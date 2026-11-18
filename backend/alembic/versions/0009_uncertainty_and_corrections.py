@@ -33,4 +33,5 @@ def downgrade() -> None:
     for table in ("claims", "knowledge_claims"):
         columns = {column["name"] for column in inspector.get_columns(table)}
         if "uncertainty" in columns:
-            op.drop_column(table, "uncertainty")
+            with op.batch_alter_table(table) as batch:
+                batch.drop_column("uncertainty")
