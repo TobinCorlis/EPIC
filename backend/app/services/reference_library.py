@@ -75,6 +75,35 @@ def scopes_match(entry: ReferenceEntry, population, timeframe, geography, metric
     )
 
 
+def ensure_entry_status(db: Session, entry: ReferenceEntry) -> None:
+    """Downgrade a supported or verified version that lacks reviewed evidence.
+
+    The previous version stays. The replacement is a new version, flagged for review.
+    """
+    from app.services.claim_confidence import SUPPORT_RULE, support_qualifies
+
+    current = latest_version(db, entry.id)
+    if current is None or current.status not in {"supported", "verified"}:
+        return
+    claim_ids = [
+        row[0]
+        for row in db.query(ReferenceEntryClaim.claim_id).filter(ReferenceEntryClaim.entry_id == entry.id).all()
+    ]
+    if support_qualifies(db, claim_ids):
+        return
+    entry.needs_review = True
+    version = append_version(
+        db,
+        entry,
+        None,
+        outcome="downgraded",
+        change_log=f"Downgraded: {SUPPORT_RULE}",
+        status="unresolved",
+    )
+    if claim_ids:
+        version.confidence_json = _confidence_json(db, claim_ids)
+
+
 def latest_version(db: Session, entry_id: int) -> ReferenceEntryVersion | None:
     return (
         db.query(ReferenceEntryVersion)
@@ -168,18 +197,26 @@ def create_entry(db: Session, user_id: int, payload) -> ReferenceEntry:
         db.add(ReferenceEntrySource(entry_id=entry.id, source_id=source_id))
     for event_id in payload.verification_event_ids:
         db.add(ReferenceEntryVerification(entry_id=entry.id, verification_event_id=event_id))
+    from app.services.claim_confidence import SUPPORT_RULE, support_qualifies
+
+    status = payload.status
+    change_log = payload.change_log.strip()
+    if status in {"supported", "verified"} and not support_qualifies(db, payload.supporting_claim_ids):
+        status = "unresolved"
+        entry.needs_review = True
+        change_log = f"{change_log} Downgraded: {SUPPORT_RULE}"
     now = utcnow()
     version = ReferenceEntryVersion(
         entry_id=entry.id,
         version_number=1,
         direct_answer=payload.direct_answer,
-        status=payload.status,
+        status=status,
         facts=payload.facts.strip(),
         interpretation=payload.interpretation.strip(),
         uncertainty=(payload.uncertainty or "").strip() or None,
         date_resolved=now,
         last_reviewed_at=now,
-        change_log=payload.change_log.strip(),
+        change_log=change_log,
         outcome="initial",
         confidence_json=_confidence_json(db, payload.supporting_claim_ids),
         created_by_user_id=user_id,
@@ -535,6 +572,9 @@ def weigh_sources(db: Session, sources: list[Source]) -> tuple[Source | None, st
         if source.id in invalidated:
             scored.append((source, None, source.publication_date or source.created_at, "invalidated"))
             continue
+        if getattr(source, "record_status", "not_checked") == "no_record_found":
+            scored.append((source, None, source.publication_date or source.created_at, "cited source: no record found"))
+            continue
         effective = effective_source_type(source.source_type, source.source_type_reviewed)
         tier_factor = TIER_RANK[effective] / 8
         record = source_record(db, source.id)
@@ -548,6 +588,8 @@ def weigh_sources(db: Session, sources: list[Source]) -> tuple[Source | None, st
         scored.append((source, reliability, when, f"tier factor {tier_factor:.3f}; {track}"))
     reliable = [item for item in scored if item[1] is not None]
     if not reliable:
+        if any(item[3] == "cited source: no record found" for item in scored):
+            return None, "cited source: no record found. No findable source was available to weigh."
         notice = next((item[0] for item in scored), None)
         return notice, (
             "Every compared source is invalidated. The invalidation is the deciding record, "
@@ -675,6 +717,16 @@ def decide_request(db: Session, request: ReevaluationRequest, user_id: int, payl
     else:
         winner_id = winner.id if winner else None
 
+    claim_ids = [
+        row[0]
+        for row in db.query(ReferenceEntryClaim.claim_id).filter(ReferenceEntryClaim.entry_id == entry.id).all()
+    ]
+    from app.services.claim_confidence import support_qualifies
+
+    status = "unresolved" if outcome == "overturned" else payload.status
+    if status in {"supported", "verified"} and not support_qualifies(db, claim_ids):
+        status = "unresolved"
+        entry.needs_review = True
     version = append_version(
         db,
         entry,
@@ -684,7 +736,7 @@ def decide_request(db: Session, request: ReevaluationRequest, user_id: int, payl
         winning_source_id=winner_id,
         winning_reason=why,
         direct_answer=payload.direct_answer,
-        status="unresolved" if outcome == "overturned" else payload.status,
+        status=status,
         facts=payload.facts,
         interpretation=payload.interpretation,
         uncertainty=payload.uncertainty,
@@ -700,10 +752,6 @@ def decide_request(db: Session, request: ReevaluationRequest, user_id: int, payl
         )
         if exists is None:
             db.add(ReferenceEntrySource(entry_id=entry.id, source_id=request.new_source_id))
-    claim_ids = [
-        row[0]
-        for row in db.query(ReferenceEntryClaim.claim_id).filter(ReferenceEntryClaim.entry_id == entry.id).all()
-    ]
     if claim_ids:
         version.confidence_json = _confidence_json(db, claim_ids)
     request.status = outcome
@@ -739,6 +787,12 @@ def resolve_point(db: Session, point: LibraryPoint, user_id: int, payload) -> Re
         )
         if linked is None:
             db.add(ReferenceEntryClaim(entry_id=entry.id, claim_id=claim_id))
+    from app.services.claim_confidence import support_qualifies
+
+    status = payload.status
+    if status == "supported" and not support_qualifies(db, payload.supporting_claim_ids):
+        status = "unresolved"
+        entry.needs_review = True
     version = append_version(
         db,
         entry,
@@ -746,7 +800,7 @@ def resolve_point(db: Session, point: LibraryPoint, user_id: int, payload) -> Re
         outcome="revised",
         change_log=payload.change_log,
         direct_answer=payload.direct_answer,
-        status=payload.status,
+        status=status,
         facts=payload.facts,
         interpretation=payload.interpretation,
         uncertainty=payload.uncertainty,

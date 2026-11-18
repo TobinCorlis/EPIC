@@ -52,9 +52,35 @@ def test_verified_and_archived_require_a_recorded_event():
         f"/debates/{debate['id']}/participants",
         json={"display_name": "Debater", "role": "debater", "side": "affirmative"},
     ).json()
+    claim = client.post(
+        f"/debates/{debate['id']}/claims",
+        json={"body": "The record is the finding.", "claim_type": "factual"},
+    ).json()
+    source = client.post(
+        "/sources",
+        json={"title": "Recorded finding", "url": "https://example.gov/verification-finding", "source_type": "government_record"},
+    ).json()
+    from app.core.database import SessionLocal
+    from app.models.auth import User, UserRole
+    with SessionLocal() as db:
+        user = db.get(User, account["user"]["id"])
+        user.role = UserRole.moderator
+        db.commit()
+    reviewed = client.post(
+        f"/sources/{source['id']}/source-type-review",
+        headers=headers,
+        json={"note": "The published type matches the document."},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    citation = client.post("/citations", json={"source_id": source["id"], "locator": "p. 1"}).json()
+    linked = client.post(
+        f"/claims/{claim['id']}/evidence",
+        json={"citation_id": citation["id"], "stance": "supports", "claim_supported": "The record is the finding."},
+    )
+    assert linked.status_code == 201, linked.text
     node = client.post(
         f"/debates/{debate['id']}/arguments",
-        json={"participant_id": participant["id"], "node_type": "premise", "body": "The record is the finding."},
+        json={"participant_id": participant["id"], "claim_id": claim["id"], "node_type": "premise", "body": "The record is the finding."},
     )
     assert node.status_code == 201
     assert node.json()["verification_status"] == "unverified"

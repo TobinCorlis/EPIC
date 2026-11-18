@@ -50,6 +50,7 @@ class ClaimRead(BaseModel):
     library_point_id: int | None = None
     library_point_status: str | None = None
     library_notice: str | None = None
+    reevaluation_pending: bool = False
     created_at: datetime
 
 

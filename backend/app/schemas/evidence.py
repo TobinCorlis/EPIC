@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -52,6 +53,8 @@ class SourceRead(BaseModel):
     source_type_reviewed_by_user_id: int | None
     source_type_reviewed_at: datetime | None
     verification_status: SourceVerificationStatus
+    record_status: str = "not_checked"
+    record_note: str | None = None
     archive_url: str | None
     archived_at: datetime | None
     quality_score: float
@@ -132,6 +135,10 @@ class ConfidenceFactorRead(BaseModel):
 class ConfidenceAssessmentRead(BaseModel):
     claim_id: int
     confidence_score: float | None
+    label: str = "Unsupported"
+    scale: str = "0–1"
+    cited_source_note: str | None = None
+    contradicting_sources: list[dict] = []
     factors: list[ConfidenceFactorRead]
     automated_source_check: str
     automated_source_check_detail: str
@@ -164,4 +171,9 @@ class ClaimEvidenceSummary(BaseModel):
 
 
 class SourceTypeReview(BaseModel):
+    note: str = Field(min_length=3, max_length=1000)
+
+
+class SourceRecordReview(BaseModel):
+    status: Literal["found", "no_record_found"]
     note: str = Field(min_length=3, max_length=1000)

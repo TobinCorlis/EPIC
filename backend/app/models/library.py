@@ -20,6 +20,7 @@ class ReferenceEntry(Base):
     question_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
     stale: Mapped[bool] = mapped_column(Boolean, default=False)
     reevaluation_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

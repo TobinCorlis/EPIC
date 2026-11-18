@@ -54,6 +54,7 @@ class KnowledgeClaimRead(BaseModel):
     uncertainty: str | None = None
     corrections: list[CorrectionRead] = []
     status_history: list[StatusHistoryRead] = []
+    reevaluation_pending: bool = False
     created_at: datetime
 
 

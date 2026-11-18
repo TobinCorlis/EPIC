@@ -1,21 +1,25 @@
 """Auditable claim confidence. This is not a verification and not a truth probability.
 
-EPIC rules used here:
-- Primary and official records outrank weaker tiers. Unreviewed self-declared
-  types stay unknown and are not given that tier's weight.
-- A source's track record is counted only from corrections, retractions,
-  upheld challenges, and denied challenges actually stored in EPIC.
-- No track record is unknown, not zero. Zero would say the source was disproven.
-- Independent corroboration saturates. Extra items of the same low tier do not
-  outweigh one stronger record.
-- Counterevidence counts only when it is recorded and has not itself been
-  refuted. Refuted contrary evidence is reported and then excluded.
-- Automated checking of external sources is not implemented. This function
-  never fetches a source and never sets verified or archived.
+Scoring rules, applied in this order:
+1. No supporting evidence, or a cited source with no findable record, scores 0
+   and is labeled Unsupported. The missing citation is recorded as
+   'cited source: no record found'. A source counts as findable only after a
+   person records that the record was found, or after they review its tier.
+   Automated lookup is not implemented and is never treated as that check.
+2. A claim contradicted by stronger, independent, reviewed evidence scores 0
+   and is labeled Refuted. The contradicting sources are listed. Weaker or
+   non-independent contradiction does not force that label.
+3. Supported and Verified require at least one supporting source whose tier
+   a person has reviewed and which was not recorded as missing. Callers
+   downgrade or block those statuses otherwise and flag the claim for review.
+4. 'Unknown – not yet rated' is only for evidence a person has found but whose
+   tier is not reviewed yet. It is never used for a missing citation.
+5. When those gates pass, the score is
+   tier_factor * track_factor * corroboration_factor * counter_factor.
+   A missing track record stays unknown and is left out of the product.
+   It is not a zero. Status changes come from recorded human review.
 
-confidence = tier_factor * track_factor * corroboration_factor * counter_factor
-when a supporting link exists. track_factor is omitted from the product when
-the source has no record. The score is null when nothing supports the claim.
+The scale is 0–1. Factor values are rounded to two decimals.
 """
 from __future__ import annotations
 
@@ -26,6 +30,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.clock import utcnow
 from app.models.argument import EvidenceChallenge
+from app.models.claim import Claim
 from app.models.evidence import Citation, ClaimEvidence, EvidenceStance, Source
 from app.models.knowledge import KnowledgeClaim, KnowledgeStatus
 from app.models.verification import VerificationEvent, VerificationSubject
@@ -33,8 +38,16 @@ from app.services.evidence_scoring import TIER_RANK, effective_source_type, inde
 
 AUTOMATED_SOURCE_CHECK = "not_implemented"
 AUTOMATED_SOURCE_CHECK_DETAIL = (
-    "Automated source checking is not implemented. No external source was fetched or compared."
+    "Automated lookup of cited sources and contradiction search is not implemented. "
+    "No external source was fetched or compared. Status changes come from recorded human or process review."
 )
+LABEL_UNSUPPORTED = "Unsupported"
+LABEL_REFUTED = "Refuted"
+LABEL_UNRATED = "Unknown – not yet rated"
+LABEL_RATED = "Rated"
+NO_RECORD = "cited source: no record found"
+SCORE_SCALE = "0–1"
+SUPPORT_RULE = "Supported or verified requires recorded supporting evidence with a reviewed tier."
 
 
 @dataclass
@@ -117,7 +130,66 @@ def source_record(db: Session, source_id: int) -> SourceRecord:
 
 
 def _factor(name: str, value: float | None, detail: str) -> dict:
-    return {"name": name, "value": value, "detail": detail}
+    rounded = None if value is None else round(float(value), 2)
+    return {"name": name, "value": rounded, "detail": detail}
+
+
+def _record_status(source) -> str:
+    return getattr(source, "record_status", None) or "not_checked"
+
+
+def source_has_reviewed_support(source) -> bool:
+    """A person reviewed the tier, and nobody recorded that the record is missing."""
+    return bool(source.source_type_reviewed) and _record_status(source) != "no_record_found"
+
+
+def source_is_unrated(source) -> bool:
+    """The record was found, and its tier has not been reviewed."""
+    return _record_status(source) == "found" and not source.source_type_reviewed
+
+
+def source_has_no_record(source) -> bool:
+    status = _record_status(source)
+    if status == "no_record_found":
+        return True
+    if status == "found" or source.source_type_reviewed:
+        return False
+    return True
+
+
+def _tier(source) -> int:
+    effective = effective_source_type(source.source_type, source.source_type_reviewed)
+    return TIER_RANK[effective]
+
+
+def support_qualifies(db: Session, claim_ids: list[int]) -> bool:
+    if not claim_ids:
+        return False
+    links = (
+        db.query(ClaimEvidence)
+        .options(joinedload(ClaimEvidence.citation).joinedload(Citation.source))
+        .filter(ClaimEvidence.claim_id.in_(claim_ids), ClaimEvidence.stance == EvidenceStance.supports)
+        .all()
+    )
+    return any(link.citation and link.citation.source and source_has_reviewed_support(link.citation.source) for link in links)
+
+
+def _assessment(score, label: str, factors: list[dict], note: str | None = None, contradicting: list[dict] | None = None) -> dict:
+    return {
+        "confidence_score": score,
+        "label": label,
+        "scale": SCORE_SCALE,
+        "cited_source_note": note,
+        "contradicting_sources": contradicting or [],
+        "automated_source_check": AUTOMATED_SOURCE_CHECK,
+        "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
+        "factors": factors,
+    }
+
+
+def _source_brief(link: ClaimEvidence) -> dict:
+    source = link.citation.source
+    return {"id": source.id, "title": source.title, "tier_rank": _tier(source)}
 
 
 def assess_claim(db: Session, claim_id: int) -> dict:
@@ -127,37 +199,99 @@ def assess_claim(db: Session, claim_id: int) -> dict:
         .filter(ClaimEvidence.claim_id == claim_id)
         .all()
     )
-    supporting = [link for link in links if link.stance == EvidenceStance.supports]
-    contradicting = [link for link in links if link.stance == EvidenceStance.contradicts]
+    supporting = [link for link in links if link.stance == EvidenceStance.supports and link.citation and link.citation.source]
+    contradicting = [link for link in links if link.stance == EvidenceStance.contradicts and link.citation and link.citation.source]
+    weighed = [link for link in supporting if source_has_reviewed_support(link.citation.source)]
+    unrated = [link for link in supporting if source_is_unrated(link.citation.source)]
+    missing = [link for link in supporting if source_has_no_record(link.citation.source)]
+    missing_note = NO_RECORD if missing else None
+
+    def stronger_contradictions() -> list[ClaimEvidence]:
+        support_keys = {independence_key(link.citation.source) for link in supporting}
+        best = max((_tier(link.citation.source) for link in weighed), default=None)
+        found = []
+        for link in contradicting:
+            source = link.citation.source
+            if not source_has_reviewed_support(source):
+                continue
+            if any(challenge.status.value == "upheld" for challenge in link.challenges):
+                continue
+            if independence_key(source) in support_keys:
+                continue
+            if best is None or _tier(source) > best:
+                found.append(link)
+        return found
+
+    stronger = stronger_contradictions()
     if not supporting:
-        breakdown = {
-            "confidence_score": None,
-            "automated_source_check": AUTOMATED_SOURCE_CHECK,
-            "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
-            "factors": [
-                _factor("tier", None, "No supporting evidence is recorded, so tier weight is unknown."),
+        breakdown = _assessment(
+            0,
+            LABEL_UNSUPPORTED,
+            [
+                _factor("tier", None, "No supporting evidence is recorded."),
                 _factor("track_record", None, "No supporting source is recorded."),
                 _factor("independent_corroboration", 0.0, "0 independent supporting sources."),
                 _factor("counterevidence", None, "Not applied without supporting evidence."),
             ],
-        }
-        _store(db, claim_id, breakdown)
-        return breakdown
+        )
+    elif stronger:
+        titles = ", ".join(f"'{link.citation.source.title}'" for link in stronger)
+        breakdown = _assessment(
+            0,
+            LABEL_REFUTED,
+            [
+                _factor("tier", 0.0, f"Stronger independent contradicting evidence is recorded: {titles}."),
+                _factor("track_record", None, "Not applied. The claim is refuted by stronger recorded evidence."),
+                _factor("independent_corroboration", 0.0, "Supporting corroboration does not outrank the contradicting sources."),
+                _factor("counterevidence", 0.0, f"{len(stronger)} stronger independent contradicting source(s)."),
+            ],
+            note=missing_note,
+            contradicting=[_source_brief(link) for link in stronger],
+        )
+    elif weighed:
+        breakdown = _rated_breakdown(db, weighed, contradicting, missing_note)
+    elif unrated and not missing:
+        titles = ", ".join(f"'{link.citation.source.title}'" for link in unrated)
+        breakdown = _assessment(
+            None,
+            LABEL_UNRATED,
+            [
+                _factor("tier", None, f"Record found for {titles}, and the tier has not been reviewed. This is not a score of zero."),
+                _factor("track_record", None, "Not weighed until the tier is reviewed."),
+                _factor("independent_corroboration", None, "Not weighed until the tier is reviewed."),
+                _factor("counterevidence", None, "Not weighed until the supporting tier is reviewed."),
+            ],
+        )
+    else:
+        titles = ", ".join(f"'{link.citation.source.title}'" for link in missing) or "the cited source"
+        breakdown = _assessment(
+            0,
+            LABEL_UNSUPPORTED,
+            [
+                _factor("tier", 0.0, f"{NO_RECORD}: {titles}."),
+                _factor("track_record", None, "No findable supporting record is available to score."),
+                _factor("independent_corroboration", 0.0, "A missing citation does not corroborate the claim."),
+                _factor("counterevidence", None, "Not applied. The supporting citation has no findable record."),
+            ],
+            note=NO_RECORD,
+        )
+    _store(db, claim_id, breakdown)
+    _apply_to_knowledge(db, claim_id, breakdown)
+    claim = db.get(Claim, claim_id)
+    if claim is not None and (breakdown["label"] == LABEL_REFUTED or breakdown["cited_source_note"] == NO_RECORD):
+        claim.needs_review = True
+    return breakdown
 
-    def tier_of(link: ClaimEvidence) -> int:
-        source = link.citation.source
-        effective = effective_source_type(source.source_type, source.source_type_reviewed)
-        return TIER_RANK[effective]
 
-    best = max(supporting, key=tier_of)
+def _rated_breakdown(db: Session, weighed: list[ClaimEvidence], contradicting: list[ClaimEvidence], missing_note: str | None) -> dict:
+    best = max(weighed, key=lambda link: _tier(link.citation.source))
     best_source = best.citation.source
-    best_tier = tier_of(best)
+    best_tier = _tier(best_source)
     tier_factor = best_tier / 8
     tier_detail = (
         f"Strongest supporting source is '{best_source.title}' "
-        f"with effective tier rank {best_tier} of 8. "
-        "Unreviewed declared types are unknown and are not given their declared rank. "
-        "Tiers are not added across items."
+        f"with reviewed tier rank {best_tier} of 8. "
+        "Unreviewed declared types are not given their declared rank. Tiers are not added across items."
     )
     record = source_record(db, best_source.id)
     if record.track_factor is None:
@@ -171,48 +305,60 @@ def assess_claim(db: Session, claim_id: int) -> dict:
             f"retracted {record.retracted}, found false {record.found_false}. "
             "The factor is confirmed / (confirmed + adverse) for this source only."
         )
-    independent = {independence_key(link.citation.source) for link in supporting}
+    independent = {independence_key(link.citation.source) for link in weighed}
     corroboration = min(len(independent), 3) / 3
-    corr_detail = (
-        f"{len(independent)} independent supporting source(s). "
-        "The factor saturates at 3 and does not grow with more items of the same tier."
-    )
     unrefuted = []
-    refuted = []
+    refuted_count = 0
     for link in contradicting:
-        upheld = any(challenge.status.value == "upheld" for challenge in link.challenges)
-        if upheld:
-            refuted.append(link)
+        if any(challenge.status.value == "upheld" for challenge in link.challenges):
+            refuted_count += 1
         else:
             unrefuted.append(link)
     unrefuted_keys = {independence_key(link.citation.source) for link in unrefuted}
     counter_factor = 1 / (1 + len(unrefuted_keys))
-    counter_detail = (
-        f"{len(contradicting)} contradicting link(s) recorded; "
-        f"{len(refuted)} refuted by an upheld challenge and excluded; "
-        f"{len(unrefuted_keys)} independent unrefuted contrary source(s) remain. "
-        "Nothing outside EPIC is assumed."
-    )
     score = tier_factor * corroboration * counter_factor
     if record.track_factor is not None:
         score *= record.track_factor
-    score = round(score, 3)
-    breakdown = {
-        "confidence_score": score,
-        "automated_source_check": AUTOMATED_SOURCE_CHECK,
-        "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
-        "factors": [
+    return _assessment(
+        round(score, 2),
+        LABEL_RATED,
+        [
             _factor("tier", tier_factor, tier_detail),
             _factor("track_record", record.track_factor, track_detail),
-            _factor("independent_corroboration", corroboration, corr_detail),
-            _factor("counterevidence", counter_factor, counter_detail),
+            _factor("independent_corroboration", corroboration, f"{len(independent)} independent supporting source(s). The factor saturates at 3."),
+            _factor(
+                "counterevidence",
+                counter_factor,
+                f"{len(contradicting)} contradicting link(s); {refuted_count} excluded after an upheld challenge; "
+                f"{len(unrefuted_keys)} independent unrefuted contrary source(s) remain.",
+            ),
         ],
-    }
-    _store(db, claim_id, breakdown)
+        note=missing_note,
+    )
+
+
+def _apply_to_knowledge(db: Session, claim_id: int, breakdown: dict) -> None:
+    from app.models.status_history import StatusHistory
+
+    qualifies = support_qualifies(db, [claim_id])
+    claim = db.get(Claim, claim_id)
     for knowledge in db.query(KnowledgeClaim).filter(KnowledgeClaim.originating_claim_id == claim_id):
+        if knowledge.status == KnowledgeStatus.verified and not qualifies:
+            previous = knowledge.status.value
+            knowledge.status = KnowledgeStatus.unverified
+            knowledge.confidence_score = 0
+            db.add(StatusHistory(
+                subject_type="knowledge_claim",
+                subject_id=knowledge.id,
+                previous_status=previous,
+                new_status="unverified",
+                note=f"Downgraded: {SUPPORT_RULE}",
+            ))
+            if claim is not None:
+                claim.needs_review = True
+            continue
         if knowledge.status not in {KnowledgeStatus.verified, KnowledgeStatus.archived}:
-            knowledge.confidence_score = score
-    return breakdown
+            knowledge.confidence_score = breakdown["confidence_score"]
 
 
 def _store(db: Session, claim_id: int, breakdown: dict) -> None:

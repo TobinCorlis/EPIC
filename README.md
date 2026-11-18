@@ -77,9 +77,15 @@ pytest -q
 
 Evidence is listed item by item. A self-declared source type stays unverified, and is ranked as unknown, until a moderator or administrator reviews it. Reviewed items are ordered by evidence tier. Items from the same publisher, host, or document count as one independent source. EPIC does not add item scores together, and publisher or author text does not add points.
 
-Claim confidence, returned with each evidence summary, is a separate auditable number. It is not a verification. `verified` still requires a recorded verification event by a named person, with the method and the archive URL or snapshot that was checked. Automated checking of external sources is not implemented and is reported as `not_implemented`.
+Claim confidence is a 0–1 score with a label. It is not a verification. Automated lookup of cited sources, and automated contradiction search, are not implemented and are reported as `not_implemented`. A person records whether a cited source was found. Status changes come from that review, from a tier review, or from a recorded verification event.
 
-The stored formula is `tier_factor * track_factor * corroboration_factor * counter_factor`:
+The rules, in order, are:
+
+- No supporting evidence, or a cited source with no findable record, scores 0 and is labeled Unsupported. The missing citation is stored as `cited source: no record found`.
+- A claim contradicted by stronger, independent, reviewed evidence scores 0 and is labeled Refuted. The contradicting sources are listed. A weaker or non-independent source does not force that label.
+- Supported and Verified require recorded supporting evidence whose tier a person has reviewed. Otherwise the status is blocked or downgraded and the claim or library entry is flagged for review. `verified` still requires a recorded verification event by a named person, with the method and the archive URL or snapshot that was checked.
+- `Unknown – not yet rated` is used only when a person has found the record and the tier has not been reviewed. It is not used for a missing or fabricated citation.
+- Otherwise the stored formula is `tier_factor * track_factor * corroboration_factor * counter_factor`. Factors are rounded to two decimals.
 
 - `tier_factor` is the strongest supporting source's reviewed tier rank divided by 8. An unreviewed declared type contributes as unknown, not as the declared tier. Tiers are not summed.
 - `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero.
