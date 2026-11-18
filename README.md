@@ -9,7 +9,7 @@ EPIC is an evidence-centered debate platform designed to keep debates on a fixed
 - Fixed-question debate records
 - Factual, inferential, and opinion claim classification
 - Automatic citation requirements for non-opinion claims
-- Initial topic-lock moderation and pivot detection
+- Rule-based review flags for pivot-style phrasing. These flags do not label a claim off-topic.
 - Source, citation, and claim-evidence data models
 - Evidence stances: supports, contradicts, and contextualizes
 - Provisional source-quality scoring with written rationale

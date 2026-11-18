@@ -32,6 +32,7 @@ class ClaimRead(BaseModel):
     claim_type: ClaimType
     citation_required: bool
     on_topic: bool
+    needs_review: bool = False
     moderation_note: str | None
     uncertainty: str | None = None
     corrections: list[CorrectionRead] = []

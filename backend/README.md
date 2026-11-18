@@ -1,7 +1,7 @@
 
-## Version 0.9 — Assisted turn moderation
+## Version 0.9 — Rule-based turn moderation
 
-EPIC now analyzes live turns before publication without allowing the automated check to make a final factual ruling. The turn preview and submission workflow checks for explicit pivots/whataboutism, likely factual assertions without a URL citation, and rebuttals that fail to identify the turn being answered. Flagged turns are preserved in a durable moderation queue. Debate owners, moderators, and administrators can approve or reject each item with a written note; every action is added to the debate event history.
+EPIC checks live turns with deterministic text rules before publication. It does not use a model, and it does not decide that a turn is off-topic. Pivot-style phrasing is flagged for a person to review. The same queue also holds likely factual assertions without a URL and rebuttals that do not identify the turn they answer. Debate owners, moderators, and administrators can approve or reject each item with a written note; every action is added to the debate event history.
 
 Key endpoints:
 

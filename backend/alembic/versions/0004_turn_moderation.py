@@ -1,4 +1,4 @@
-"""Add AI-assisted turn moderation review queue.
+"""Add rule-based turn moderation review queue.
 
 Revision ID: 0004_turn_moderation
 Revises: 0003_live_debate_turns

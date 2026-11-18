@@ -59,7 +59,8 @@ def add_claim(
         body=payload.body,
         claim_type=payload.claim_type,
         citation_required=payload.claim_type.value != "opinion",
-        on_topic=result.on_topic,
+        on_topic=True,
+        needs_review=result.needs_review,
         moderation_note=result.note,
         uncertainty=(payload.uncertainty or "").strip() or None,
     )
