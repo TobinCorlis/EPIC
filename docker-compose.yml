@@ -1,0 +1,40 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: epic
+      POSTGRES_USER: epic
+      POSTGRES_PASSWORD: epic-local-only
+    volumes:
+      - epic_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epic -d epic"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: ./backend
+    environment: &epic_env
+      APP_ENV: development
+      DATABASE_URL: postgresql+psycopg://epic:epic-local-only@db:5432/epic
+      SECRET_KEY: local-development-secret-change-before-production
+      ALLOWED_ORIGINS: http://localhost:8000
+      TRUSTED_HOSTS: localhost,127.0.0.1,web
+      AUTO_CREATE_SCHEMA: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "app.services.research_worker"]
+    environment: *epic_env
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  epic_postgres:
