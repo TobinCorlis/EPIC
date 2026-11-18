@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.clock import utcnow
 from app.core.database import Base
 
 
@@ -24,6 +25,6 @@ class StatusHistory(Base):
     verification_event_id: Mapped[int | None] = mapped_column(
         ForeignKey("verification_events.id"), nullable=True, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     verification_event = relationship("VerificationEvent")

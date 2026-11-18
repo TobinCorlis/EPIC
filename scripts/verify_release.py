@@ -175,8 +175,24 @@ def assert_upgraded(url: str, before: dict[str, int]) -> None:
             url,
             "SELECT status, confidence_score FROM knowledge_claims WHERE body LIKE 'The agency report%'",
         )
-        == [("unverified", 1.0)],
-        "The seeded verified knowledge claim was not demoted, or its confidence was rewritten",
+        == [("unverified", None)],
+        "The seeded verified knowledge claim was not demoted to unknown confidence",
+    )
+    require(
+        scalar(
+            url,
+            "SELECT note FROM status_history WHERE subject_type = 'knowledge_claim' AND previous_status = 'verified'",
+        )
+        == "Marked verified in rc2; no verification record found",
+        "The knowledge-claim history note was not kept",
+    )
+    require(
+        scalar(
+            url,
+            "SELECT note FROM status_history WHERE subject_type = 'argument_node' AND previous_status = 'verified'",
+        )
+        == "Marked verified in rc2; no verification record found",
+        "The argument history note was not kept",
     )
     require(scalar(url, "SELECT COUNT(*) FROM verification_events") == 0, "Upgrade invented a verification event")
     require(
