@@ -103,6 +103,16 @@ def source_record(db: Session, source_id: int) -> SourceRecord:
                 )
                 .count()
             )
+    from app.models.library import UpstreamInvalidation
+
+    retracted += (
+        db.query(UpstreamInvalidation)
+        .filter(
+            UpstreamInvalidation.subject_type == "source",
+            UpstreamInvalidation.subject_id == source_id,
+        )
+        .count()
+    )
     return SourceRecord(source_id, corrected, retracted, found_false, confirmed)
 
 
