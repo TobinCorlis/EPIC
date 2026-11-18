@@ -8,11 +8,13 @@ from app.core.database import Base
 
 
 class KnowledgeStatus(str, Enum):
+    unverified = "unverified"
     candidate = "candidate"
     reviewed = "reviewed"
     verified = "verified"
     disputed = "disputed"
     retired = "retired"
+    archived = "archived"
 
 
 class ContradictionStatus(str, Enum):
@@ -69,7 +71,7 @@ class KnowledgeClaim(Base):
     body: Mapped[str] = mapped_column(Text)
     normalized_body: Mapped[str] = mapped_column(Text)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[KnowledgeStatus] = mapped_column(SqlEnum(KnowledgeStatus), default=KnowledgeStatus.candidate)
+    status: Mapped[KnowledgeStatus] = mapped_column(SqlEnum(KnowledgeStatus), default=KnowledgeStatus.unverified)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

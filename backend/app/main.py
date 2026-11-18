@@ -13,6 +13,7 @@ from app.api.evidence import router as evidence_router
 from app.api.export import router as export_router
 from app.api.knowledge import router as knowledge_router
 from app.api.collaboration import router as collaboration_router
+from app.api.verification import router as verification_router
 from app.core.config import settings
 from app.core.database import Base, database_ready, engine
 
@@ -59,6 +60,7 @@ app.include_router(evidence_router)
 app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(collaboration_router)
+app.include_router(verification_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

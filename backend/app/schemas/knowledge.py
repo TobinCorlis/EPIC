@@ -31,18 +31,23 @@ class DossierSourceRead(DossierSourceCreate):
 
 
 class KnowledgeClaimCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     body: str = Field(min_length=3)
     originating_claim_id: int | None = None
-    status: KnowledgeStatus = KnowledgeStatus.candidate
-    confidence_score: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
-class KnowledgeClaimRead(KnowledgeClaimCreate):
+class KnowledgeClaimRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
     id: int
     dossier_id: int
+    body: str
+    originating_claim_id: int | None = None
     normalized_body: str
     fingerprint: str
+    status: KnowledgeStatus
+    confidence_score: float
     created_at: datetime
 
 

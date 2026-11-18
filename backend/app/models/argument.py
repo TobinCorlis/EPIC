@@ -28,11 +28,13 @@ class ArgumentNodeType(str, Enum):
 
 
 class VerificationStatus(str, Enum):
+    unverified = "unverified"
     unreviewed = "unreviewed"
     pending = "pending"
     verified = "verified"
     disputed = "disputed"
     rejected = "rejected"
+    archived = "archived"
 
 
 class ChallengeStatus(str, Enum):
@@ -82,7 +84,7 @@ class ArgumentNode(Base):
     side: Mapped[DebateSide] = mapped_column(SqlEnum(DebateSide))
     body: Mapped[str] = mapped_column(Text)
     verification_status: Mapped[VerificationStatus] = mapped_column(
-        SqlEnum(VerificationStatus), default=VerificationStatus.unreviewed
+        SqlEnum(VerificationStatus), default=VerificationStatus.unverified
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

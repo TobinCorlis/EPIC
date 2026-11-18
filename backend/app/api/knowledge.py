@@ -12,6 +12,7 @@ from app.models.knowledge import (
     ContradictionStatus,
     DossierSource,
     KnowledgeClaim,
+    KnowledgeStatus,
     ResearchJob,
     ResearchJobEvent,
     ResearchJobStatus,
@@ -88,9 +89,12 @@ def add_knowledge_claim(dossier_id: int, payload: KnowledgeClaimCreate, db: Sess
     normalized = normalize_claim(payload.body)
     item = KnowledgeClaim(
         dossier_id=dossier_id,
+        body=payload.body,
+        originating_claim_id=payload.originating_claim_id,
         normalized_body=normalized,
         fingerprint=fingerprint_claim(payload.body),
-        **payload.model_dump(),
+        status=KnowledgeStatus.unverified,
+        confidence_score=0.0,
     )
     db.add(item)
     try:
