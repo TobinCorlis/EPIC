@@ -30,6 +30,7 @@ class ResearchJobStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+    not_implemented = "not_implemented"
 
 
 class TopicDossier(Base):

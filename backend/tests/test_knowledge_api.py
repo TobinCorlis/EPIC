@@ -37,28 +37,27 @@ def test_dossier_duplicate_matching_and_research_progress():
     assert job.status_code == 201
     job_id = job.json()["id"]
 
-    progress = client.patch(
-        f"/knowledge/jobs/{job_id}",
-        json={"progress_percent": 45, "current_step": "Reviewing sources", "message": "Three sources screened"},
-    )
-    assert progress.status_code == 200
-    assert progress.json()["status"] == "running"
-
-    completed = client.patch(
+    fabricated = client.patch(
         f"/knowledge/jobs/{job_id}",
         json={
             "progress_percent": 100,
             "current_step": "Complete",
             "message": "Research package ready",
             "result_summary": "Five official and peer-reviewed sources retained.",
+            "status": "completed",
         },
     )
-    assert completed.status_code == 200
-    assert completed.json()["status"] == "completed"
+    assert fabricated.status_code == 401
+    stored = client.get(f"/knowledge/jobs/{job_id}")
+    assert stored.json()["status"] == "queued"
+    assert stored.json()["result_summary"] is None
+    from app.core.database import SessionLocal
+    from app.models.knowledge import ResearchJob, ResearchJobStatus
 
-    events = client.get(f"/knowledge/jobs/{job_id}/events")
-    assert events.status_code == 200
-    assert [event["progress_percent"] for event in events.json()] == [0, 45, 100]
+    with SessionLocal() as db:
+        row = db.get(ResearchJob, job_id)
+        row.status = ResearchJobStatus.cancelled
+        db.commit()
 
 
 def test_contradiction_candidate_is_created_and_reviewable():
@@ -93,16 +92,44 @@ def test_contradiction_candidate_is_created_and_reviewable():
     assert reviewed.json()["status"] == "confirmed"
 
 
-def test_research_progress_cannot_move_backward():
+def test_staff_cannot_fabricate_research_completion():
+    account = client.post(
+        "/auth/register",
+        json={"email": "research-moderator@example.com", "display_name": "Research Mod", "password": "verysecure123"},
+    )
+    assert account.status_code == 201
+    from app.core.database import SessionLocal
+    from app.models.auth import User, UserRole
+
+    with SessionLocal() as db:
+        user = db.get(User, account.json()["user"]["id"])
+        user.role = UserRole.moderator
+        db.commit()
+    headers = {"Authorization": f"Bearer {account.json()['access_token']}"}
     job = client.post("/knowledge/jobs", json={"query": "Research a stable historical question"})
     assert job.status_code == 201
     job_id = job.json()["id"]
-    assert client.patch(
+    blocked = client.patch(
         f"/knowledge/jobs/{job_id}",
-        json={"progress_percent": 60, "current_step": "Extracting claims"},
-    ).status_code == 200
-    backwards = client.patch(
-        f"/knowledge/jobs/{job_id}",
-        json={"progress_percent": 20, "current_step": "Searching"},
+        headers=headers,
+        json={
+            "status": "completed",
+            "progress_percent": 100,
+            "current_step": "Complete",
+            "result_summary": "Sources were not actually searched.",
+        },
     )
-    assert backwards.status_code == 409
+    assert blocked.status_code == 409
+    assert "not implemented" in blocked.json()["detail"]
+    stored = client.get(f"/knowledge/jobs/{job_id}").json()
+    assert stored["status"] == "queued"
+    assert stored["result_summary"] is None
+
+    cancelled = client.patch(
+        f"/knowledge/jobs/{job_id}",
+        headers=headers,
+        json={"status": "cancelled"},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["result_summary"] is None

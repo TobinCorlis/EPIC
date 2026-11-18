@@ -10,13 +10,10 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.knowledge import ResearchJob, ResearchJobEvent, ResearchJobStatus
 
-_STEPS = [
-    (10, "Planning research"),
-    (30, "Searching registered sources"),
-    (55, "Comparing claims"),
-    (80, "Preparing evidence summary"),
-    (100, "Completed"),
-]
+NOT_IMPLEMENTED_STEP = "Automated research is not implemented"
+NOT_IMPLEMENTED_MESSAGE = (
+    "Automated research is not implemented. No sources were searched and no claims were compared."
+)
 
 
 def claim_next_job(worker_id: str) -> int | None:
@@ -51,39 +48,42 @@ def claim_next_job(worker_id: str) -> int | None:
         db.close()
 
 
-def process_job(job_id: int, delay: float = 0.03) -> None:
-    for percent, step in _STEPS:
-        if delay:
-            time.sleep(delay)
-        db = SessionLocal()
-        try:
-            job = db.get(ResearchJob, job_id)
-            if not job or job.status == ResearchJobStatus.cancelled:
-                return
-            job.progress_percent = percent
-            job.current_step = step
-            job.status = ResearchJobStatus.completed if percent == 100 else ResearchJobStatus.running
-            if percent == 100:
-                job.result_summary = "Research workflow completed. Review linked sources, matches, and contradiction candidates."
-                job.completed_at = datetime.utcnow()
-            db.add(ResearchJobEvent(job_id=job.id, progress_percent=percent, step=step, message=step))
+def process_job(job_id: int, delay: float = 0.0) -> None:
+    """Record that no automated research was performed.
+
+    The delay argument is ignored. It remains so existing callers do not
+    simulate work that this worker does not do.
+    """
+    del delay
+    db = SessionLocal()
+    try:
+        job = db.get(ResearchJob, job_id)
+        if not job or job.status == ResearchJobStatus.cancelled:
+            return
+        job.status = ResearchJobStatus.not_implemented
+        job.progress_percent = 0
+        job.current_step = NOT_IMPLEMENTED_STEP
+        job.result_summary = None
+        job.error_message = NOT_IMPLEMENTED_MESSAGE
+        job.completed_at = None
+        db.add(ResearchJobEvent(
+            job_id=job.id,
+            progress_percent=0,
+            step=NOT_IMPLEMENTED_STEP,
+            message=NOT_IMPLEMENTED_MESSAGE,
+        ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        job = db.get(ResearchJob, job_id)
+        if job and job.status != ResearchJobStatus.not_implemented:
+            job.error_message = str(exc)[:2000]
+            job.status = ResearchJobStatus.failed
+            job.completed_at = None
             db.commit()
-        except Exception as exc:
-            db.rollback()
-            job = db.get(ResearchJob, job_id)
-            if job:
-                job.error_message = str(exc)[:2000]
-                if job.attempt_count >= settings.worker_max_attempts:
-                    job.status = ResearchJobStatus.failed
-                    job.completed_at = datetime.utcnow()
-                else:
-                    job.status = ResearchJobStatus.queued
-                    job.worker_id = None
-                    job.claimed_at = None
-                db.commit()
-            raise
-        finally:
-            db.close()
+        raise
+    finally:
+        db.close()
 
 
 def run_worker(once: bool = False, poll_seconds: float | None = None) -> None:

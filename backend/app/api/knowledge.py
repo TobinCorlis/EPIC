@@ -1,12 +1,10 @@
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.authorization import require_enforced_staff, require_enforced_writer
+from app.core.authorization import require_enforced_staff, require_enforced_writer, require_role
 from app.core.database import get_db
-from app.models.auth import User
+from app.models.auth import User, UserRole
 from app.models.claim import Claim
 from app.models.evidence import Source
 from app.models.knowledge import (
@@ -229,32 +227,33 @@ def update_research_job(
     job_id: int,
     payload: ResearchJobUpdate,
     db: Session = Depends(get_db),
-    _: User | None = Depends(require_enforced_writer),
+    user: User = Depends(require_role(UserRole.moderator, UserRole.administrator)),
 ):
     job = db.get(ResearchJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")
-    if payload.progress_percent < job.progress_percent:
-        raise HTTPException(status_code=409, detail="Research progress cannot move backward")
-
-    job.progress_percent = payload.progress_percent
-    job.current_step = payload.current_step
-    job.result_summary = payload.result_summary if payload.result_summary is not None else job.result_summary
-    job.error_message = payload.error_message if payload.error_message is not None else job.error_message
-    if payload.status is not None:
-        job.status = payload.status
-    elif payload.progress_percent > 0 and job.status == ResearchJobStatus.queued:
-        job.status = ResearchJobStatus.running
-    if payload.progress_percent == 100 and job.status not in {ResearchJobStatus.failed, ResearchJobStatus.cancelled}:
-        job.status = ResearchJobStatus.completed
-    if job.status in {ResearchJobStatus.completed, ResearchJobStatus.failed, ResearchJobStatus.cancelled}:
-        job.completed_at = datetime.utcnow()
-
+    dishonest = (
+        payload.result_summary is not None
+        or payload.status == ResearchJobStatus.completed
+        or payload.progress_percent == 100
+        or (payload.status not in {None, ResearchJobStatus.cancelled})
+    )
+    if dishonest or payload.status != ResearchJobStatus.cancelled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Automated research is not implemented. A job cannot be marked complete, "
+                "advanced, or given a result summary. A moderator may cancel it."
+            ),
+        )
+    job.status = ResearchJobStatus.cancelled
+    job.current_step = "Cancelled"
+    job.result_summary = None
     db.add(ResearchJobEvent(
         job_id=job.id,
         progress_percent=job.progress_percent,
         step=job.current_step,
-        message=payload.message,
+        message=payload.message or f"Cancelled by user {user.id}",
     ))
     db.commit()
     db.refresh(job)

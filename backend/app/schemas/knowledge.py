@@ -85,8 +85,8 @@ class ResearchJobCreate(BaseModel):
 
 class ResearchJobUpdate(BaseModel):
     status: ResearchJobStatus | None = None
-    progress_percent: int = Field(ge=0, le=100)
-    current_step: str = Field(min_length=1, max_length=250)
+    progress_percent: int | None = Field(default=None, ge=0, le=100)
+    current_step: str | None = Field(default=None, min_length=1, max_length=250)
     message: str | None = None
     result_summary: str | None = None
     error_message: str | None = None
