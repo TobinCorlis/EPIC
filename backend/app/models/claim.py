@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, Enum as SqlEnum, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class ClaimType(str, Enum):
@@ -25,7 +26,7 @@ class Claim(Base):
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     corrections = relationship("ClaimCorrection", back_populates="claim", cascade="all, delete-orphan")
 

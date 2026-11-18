@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class VerificationSubject(str, Enum):
@@ -35,6 +36,6 @@ class VerificationEvent(Base):
     method: Mapped[str] = mapped_column(String(200))
     archive_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     snapshot_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     actor = relationship("User")

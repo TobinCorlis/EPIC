@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class DebateStatus(str, Enum):
@@ -24,7 +25,7 @@ class Debate(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[DebateStatus] = mapped_column(SqlEnum(DebateStatus), default=DebateStatus.draft)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     owner = relationship("User", back_populates="owned_debates")
     claims = relationship("Claim", back_populates="debate", cascade="all, delete-orphan")

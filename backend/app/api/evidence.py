@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -9,6 +8,7 @@ from app.core.database import get_db
 from app.models.auth import User, UserRole
 from app.models.claim import Claim
 from app.models.evidence import Citation, ClaimEvidence, Source, SourceVerificationStatus
+from app.core.clock import utcnow
 from app.schemas.evidence import (
     CitationCreate,
     CitationRead,
@@ -126,7 +126,7 @@ def review_source_type(
         raise HTTPException(status_code=404, detail="Source not found")
     source.source_type_reviewed = True
     source.source_type_reviewed_by_user_id = user.id
-    source.source_type_reviewed_at = datetime.utcnow()
+    source.source_type_reviewed_at = utcnow()
     source.quality_score, source.quality_rationale = score_source(
         source.source_type,
         source.publisher,

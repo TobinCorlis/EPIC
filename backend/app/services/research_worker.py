@@ -2,13 +2,13 @@ import argparse
 import socket
 import threading
 import time
-from datetime import datetime
 
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.knowledge import ResearchJob, ResearchJobEvent, ResearchJobStatus
+from app.core.clock import utcnow
 
 NOT_IMPLEMENTED_STEP = "Automated research is not implemented"
 NOT_IMPLEMENTED_MESSAGE = (
@@ -33,7 +33,7 @@ def claim_next_job(worker_id: str) -> int | None:
             return None
         job.status = ResearchJobStatus.running
         job.current_step = "Claimed by worker"
-        job.claimed_at = datetime.utcnow()
+        job.claimed_at = utcnow()
         job.worker_id = worker_id
         job.attempt_count += 1
         db.add(ResearchJobEvent(

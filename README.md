@@ -2,6 +2,28 @@
 
 EPIC is an evidence-centered debate platform designed to keep debates on a fixed question, distinguish fact from inference and opinion, and connect each factual claim to reviewable evidence.
 
+## What this build does and does not do
+
+Implemented:
+
+- Debate, claim, source, citation, and evidence-link records. A source needs a URL or a document reference. Each evidence link states the claim it supports.
+- `verified` and `archived` only through a logged-in verification event with a method and an archive URL or snapshot hash. New claims and sources start unverified.
+- Evidence listed by item. Declared source type stays unverified until a moderator reviews it. Ranking uses evidence tier and source independence. Scores are not added together.
+- Uncertainty on claims, and a correction log (original text, replacement, reason, time, author) included in reads and debate exports.
+- Rule-based review flags. Phrases such as "what about" are not labelled off-topic.
+- Accounts, PBKDF2 passwords, bearer sessions whose lifetime follows `SESSION_HOURS`, and logout that deletes the server session. `SECRET_KEY` is the HMAC key for session token hashes.
+- Optional authorization. With `ENFORCE_AUTHORIZATION=true`, knowledge writes, argument creation, and evidence challenges require a logged-in user with the permissions described below. `python -m app.cli create-admin` creates the first administrator.
+- A research-job queue. The worker records that automated research is not implemented. It does not search, compare claims, or mark a job completed.
+
+Not implemented:
+
+- Automated source search, claim comparison, or a completed research result.
+- An AI or model that judges relevance, truth, or rulings. The "AI assistant" value is a participant role label.
+- Treating a self-declared source type, publisher, or author string as reviewed evidence.
+- A summed evidence score.
+
+`ALLOWED_ORIGINS` and `TRUSTED_HOSTS` accept a comma-separated list, as in `.env.example`, or a JSON list.
+
 ## Current working foundation
 
 - FastAPI backend with interactive OpenAPI documentation
@@ -95,13 +117,13 @@ EPIC now serves a responsive browser workspace at `/` with:
 - Expiring bearer sessions and logout invalidation
 - Authenticated workspace summary
 - Debate creation and debate-room listing
-- Automated research-job creation
-- Live progress polling and progress bars
+- Research-job creation that records automated research as not implemented
+- Live status polling and progress bars
 - Direct access to the evidence, challenge, argument, and ruling APIs
 
 Run the backend and open `http://127.0.0.1:8000/` for the application or `/docs` for the complete API workspace.
 
-The included in-process worker is appropriate for local development and demonstrations. A production deployment should replace it with a durable queue such as Celery/RQ plus Redis, use PostgreSQL, enforce authorization on every write route, and deploy behind HTTPS.
+The in-process worker does not perform research. It records `not_implemented`. A production deployment should use PostgreSQL, enforce authorization, and deploy behind HTTPS. A separate queue will not create research results until a real research step exists.
 
 ## Production-hardening stage (v0.5)
 
@@ -121,7 +143,7 @@ From `backend/`:
 python -m app.services.research_worker
 ```
 
-See `docs/PRODUCTION_DEPLOYMENT.md` for security and release requirements. Local automatic worker threads remain enabled only as a developer convenience; production mode leaves queued work for the durable worker process.
+See `docs/PRODUCTION_DEPLOYMENT.md` for security and release requirements. Local threads and the separate worker process both record that automated research is not implemented. Neither one marks that work completed.
 
 
 ## Version 0.6: migrations and authorization
@@ -215,7 +237,7 @@ From an activated environment with dependencies installed:
 python scripts/verify_release.py
 ```
 
-This creates a temporary clean database, applies every Alembic migration, and runs the complete automated test suite.
+This creates a temporary clean database, applies every Alembic migration, and runs the complete automated test suite. It then builds an unmodified v1.0-rc2 database, seeds it, upgrades that database to the current revision, and downgrades it again. Set `EPIC_UPGRADE_POSTGRES_URL` to a disposable PostgreSQL database to run the same upgrade check there. The URL's schema is dropped.
 
 ## Important deployment boundary
 

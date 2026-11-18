@@ -18,6 +18,9 @@ def test_registration_login_and_dashboard():
     assert dashboard.json()['counts']['debates'] >= 0
     login = client.post('/auth/login', json={'email':'builder@example.com','password':'strongpass123'})
     assert login.status_code == 200
+    logout = client.post('/auth/logout', headers={'Authorization': f'Bearer {login.json()["access_token"]}'})
+    assert logout.status_code == 204
+    assert client.get('/auth/me', headers={'Authorization': f'Bearer {login.json()["access_token"]}'}).status_code == 401
 
 
 def test_automatic_research_worker_advances_job():

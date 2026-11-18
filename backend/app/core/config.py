@@ -1,6 +1,9 @@
+import json
 from functools import lru_cache
+from typing import Annotated
+
 from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -9,8 +12,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./epic.db"
     secret_key: str = "development-only-change-me"
     session_hours: int = 168
-    allowed_origins: list[str] = ["http://localhost:8000"]
-    trusted_hosts: list[str] = ["localhost", "127.0.0.1", "testserver"]
+    allowed_origins: Annotated[list[str], NoDecode] = ["http://localhost:8000"]
+    trusted_hosts: Annotated[list[str], NoDecode] = ["localhost", "127.0.0.1", "testserver"]
     auto_create_schema: bool = True
     worker_poll_seconds: float = 1.0
     worker_max_attempts: int = 3
@@ -19,9 +22,15 @@ class Settings(BaseSettings):
 
     @field_validator("allowed_origins", "trusted_hosts", mode="before")
     @classmethod
-    def split_csv(cls, value):
+    def parse_string_list(cls, value):
         if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
+            text = value.strip()
+            if text.startswith("["):
+                parsed = json.loads(text)
+                if not isinstance(parsed, list):
+                    raise ValueError("expected a JSON list")
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return [item.strip() for item in text.split(",") if item.strip()]
         return value
 
     @model_validator(mode="after")

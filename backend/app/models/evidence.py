@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SqlEnum, Floa
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class SourceType(str, Enum):
@@ -58,7 +59,7 @@ class Source(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)
     quality_rationale: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     citations = relationship("Citation", back_populates="source", cascade="all, delete-orphan")
 
@@ -70,7 +71,7 @@ class Citation(Base):
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
     locator: Mapped[str | None] = mapped_column(String(250), nullable=True)
     excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)
-    accessed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    accessed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     source = relationship("Source", back_populates="citations")
     claim_links = relationship("ClaimEvidence", back_populates="citation", cascade="all, delete-orphan")
@@ -87,7 +88,7 @@ class ClaimEvidence(Base):
     claim_supported: Mapped[str] = mapped_column(Text)
     relevance_score: Mapped[float] = mapped_column(Float, default=0.5)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     claim = relationship("Claim", back_populates="evidence_links")
     citation = relationship("Citation", back_populates="claim_links")

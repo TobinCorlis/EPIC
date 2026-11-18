@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import token_digest
 from app.models.auth import AuthSession, User, UserRole
+from app.core.clock import utcnow
 
 
 def get_optional_user(
@@ -17,10 +18,7 @@ def get_optional_user(
         raise HTTPException(status_code=401, detail="Invalid authorization header")
     token = authorization.split(" ", 1)[1].strip()
     session = db.query(AuthSession).filter(AuthSession.token_hash == token_digest(token)).first()
-    if not session:
-        raise HTTPException(status_code=401, detail="Session is invalid or expired")
-    from datetime import datetime
-    if session.expires_at <= datetime.utcnow():
+    if not session or session.expires_at <= utcnow():
         raise HTTPException(status_code=401, detail="Session is invalid or expired")
     user = db.get(User, session.user_id)
     if not user or not user.is_active:
