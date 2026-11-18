@@ -88,6 +88,16 @@ The stored formula is `tier_factor * track_factor * corroboration_factor * count
 
 Scope checks use only the population, timeframe, geography, metric, and study type a user entered, plus a few wording patterns (some stated as all, a correlation or observational study stated as causation, a city or state study stated as national). They do not read an external paper. A flag means needs review. It does not reject the claim. An outlier is flagged only when a contradicting link is already recorded on that claim. A near match on question text with a different entered scope is a different question.
 
+## Reference library
+
+The library reuses a recorded answer when a debate is opened or a claim or argument is added. A match requires the question text and the same entered scope. The answer keeps facts, interpretation, and uncertainty separate, and it links the claims, sources, and verification events already stored. EPIC does not seed answers.
+
+A point the entry already covers is linked to that version. A point it does not cover is marked "new point, not yet researched" and queued on the research-job path. That path still records `not_implemented`. Resolving the point appends a version and a change log. The previous version stays.
+
+Any signed-in user can request re-evaluation of an entry or a verified claim, with a reason and optional new evidence. The entry shows "re-evaluation pending" while the request is open. The decision weighs the confidence factors above. The most reliable evidence wins. The most recent evidence wins only when reliability is equal. The decision records which source won and why. Outcomes are upheld, revised, or overturned, and each one appends a version.
+
+An upstream invalidation records that a source or verification rested on false information, fabrication, misconduct, retraction, or error, in EPIC or upstream. The invalidation has its own source. Affected claims are demoted, confidence is recomputed, dependent library entries and debates are marked stale, correction-log rows are written, and the source track record counts the invalidation. The original verification is tagged `invalidated: ...` and is not described as a legitimate past verification. A stale entry is not served as the current answer.
+
 ## Structured argument workflow
 
 1. Add participants to a debate and assign roles and sides.

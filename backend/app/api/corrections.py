@@ -11,6 +11,7 @@ from app.models.knowledge import KnowledgeClaim
 from app.schemas.claim import ClaimRead, CorrectionCreate
 from app.schemas.knowledge import KnowledgeClaimRead
 from app.services.knowledge_matching import fingerprint_claim, normalize_claim
+from app.services.reference_library import mark_stale_for_claim
 
 router = APIRouter(tags=["corrections"])
 
@@ -47,6 +48,7 @@ def correct_debate_claim(
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
     db.add(_apply_correction(claim, payload, user, knowledge=False))
+    mark_stale_for_claim(db, claim.id)
     db.commit()
     db.refresh(claim)
     return claim
@@ -63,6 +65,8 @@ def correct_knowledge_claim(
     if not claim:
         raise HTTPException(status_code=404, detail="Knowledge claim not found")
     db.add(_apply_correction(claim, payload, user, knowledge=True))
+    if claim.originating_claim_id:
+        mark_stale_for_claim(db, claim.originating_claim_id)
     try:
         db.commit()
     except IntegrityError as exc:

@@ -21,4 +21,10 @@ class DebateRead(DebateCreate):
     id: int
     status: DebateStatus
     owner_user_id: int | None = None
+    library_stale: bool = False
+    library_entry_id: int | None = None
+    library_served: bool = False
+    library_last_reviewed_at: datetime | None = None
+    library_reevaluation_pending: bool = False
+    library_notice: str | None = None
     created_at: datetime

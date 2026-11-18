@@ -11,6 +11,8 @@ from app.core.authorization import (
 )
 from app.core.clock import utcnow
 from app.services.verification_history import overturn_verified_for_debate_claim
+from app.services.reference_library import annotate_point, consider_text
+from app.api.library import enqueue_after
 from app.core.database import get_db
 from app.models.argument import (
     ArgumentNode,
@@ -123,8 +125,14 @@ def create_argument_node(
         **payload.model_dump(),
     )
     db.add(node)
+    db.flush()
+    job_ids = consider_text(db, debate, node.body, argument_node_id=node.id)
+    db.flush()
+    annotate_point(db, node, argument_node_id=node.id)
     db.commit()
+    enqueue_after(job_ids)
     db.refresh(node)
+    annotate_point(db, node, argument_node_id=node.id)
     return node
 
 

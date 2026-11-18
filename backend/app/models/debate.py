@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, Enum as SqlEnum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -29,6 +29,7 @@ class Debate(Base):
     question_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[DebateStatus] = mapped_column(SqlEnum(DebateStatus), default=DebateStatus.draft)
+    library_stale: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     owner = relationship("User", back_populates="owned_debates")
