@@ -97,6 +97,20 @@ class EvidenceItemRead(BaseModel):
     claim_supported: str
 
 
+class ConfidenceFactorRead(BaseModel):
+    name: str
+    value: float | None
+    detail: str
+
+
+class ConfidenceAssessmentRead(BaseModel):
+    claim_id: int
+    confidence_score: float | None
+    factors: list[ConfidenceFactorRead]
+    automated_source_check: str
+    automated_source_check_detail: str
+
+
 class ClaimEvidenceSummary(BaseModel):
     claim_id: int
     items: list[EvidenceItemRead]
@@ -104,6 +118,7 @@ class ClaimEvidenceSummary(BaseModel):
     independent_source_count: int
     citation_count: int
     citation_requirement_met: bool
+    confidence: ConfidenceAssessmentRead | None = None
 
 
 class SourceTypeReview(BaseModel):
