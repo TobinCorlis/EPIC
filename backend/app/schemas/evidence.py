@@ -1,17 +1,28 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from app.models.evidence import EvidenceStance, SourceType
+from app.models.evidence import EvidenceStance, SourceType, SourceVerificationStatus
 
 
 class SourceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(min_length=3, max_length=500)
-    url: HttpUrl
+    url: HttpUrl | None = None
+    document_reference: str | None = Field(default=None, max_length=1000)
     publisher: str | None = Field(default=None, max_length=300)
     author: str | None = Field(default=None, max_length=300)
     publication_date: datetime | None = None
     source_type: SourceType = SourceType.unknown
+
+    @model_validator(mode="after")
+    def require_url_or_document(self):
+        document = (self.document_reference or "").strip()
+        self.document_reference = document or None
+        if self.url is None and self.document_reference is None:
+            raise ValueError("A source requires a URL or a document reference")
+        return self
 
 
 class SourceRead(BaseModel):
@@ -19,11 +30,15 @@ class SourceRead(BaseModel):
 
     id: int
     title: str
-    url: str
+    url: str | None
+    document_reference: str | None
     publisher: str | None
     author: str | None
     publication_date: datetime | None
     source_type: SourceType
+    verification_status: SourceVerificationStatus
+    archive_url: str | None
+    archived_at: datetime | None
     quality_score: float
     quality_rationale: str
     created_at: datetime
@@ -46,8 +61,11 @@ class CitationRead(BaseModel):
 
 
 class EvidenceLinkCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     citation_id: int
     stance: EvidenceStance
+    claim_supported: str = Field(min_length=1, max_length=4000)
     relevance_score: float = Field(default=0.5, ge=0.0, le=1.0)
     note: str | None = Field(default=None, max_length=2000)
 
@@ -59,6 +77,7 @@ class EvidenceLinkRead(BaseModel):
     claim_id: int
     citation_id: int
     stance: EvidenceStance
+    claim_supported: str
     relevance_score: float
     note: str | None
     created_at: datetime

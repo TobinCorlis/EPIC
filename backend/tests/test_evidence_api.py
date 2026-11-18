@@ -38,7 +38,12 @@ def test_claim_evidence_workflow():
 
     link = client.post(
         f"/claims/{claim.json()['id']}/evidence",
-        json={"citation_id": citation.json()["id"], "stance": "supports", "relevance_score": 0.8},
+        json={
+            "citation_id": citation.json()["id"],
+            "stance": "supports",
+            "relevance_score": 0.8,
+            "claim_supported": "The available evidence supports the claim.",
+        },
     )
     assert link.status_code == 201
 

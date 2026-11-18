@@ -14,7 +14,7 @@ def test_claim_listing_and_debate_exports():
 
     source = client.post('/sources', json={'title':'Official export record','url':'https://example.gov/export-record','publisher':'Example Agency','source_type':'government_record'}).json()
     citation = client.post('/citations', json={'source_id':source['id'],'locator':'p. 7'}).json()
-    client.post(f"/claims/{claim['id']}/evidence", json={'citation_id':citation['id'],'stance':'supports','relevance_score':0.9})
+    client.post(f"/claims/{claim['id']}/evidence", json={'citation_id':citation['id'],'stance':'supports','relevance_score':0.9,'claim_supported':'The record supports the proposition.'})
 
     export = client.get(f"/debates/{debate['id']}/export")
     assert export.status_code == 200

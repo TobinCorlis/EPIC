@@ -6,7 +6,7 @@ from app.core.authorization import enforce_write_access, get_optional_user
 from app.core.database import get_db
 from app.models.auth import User
 from app.models.claim import Claim
-from app.models.evidence import Citation, ClaimEvidence, Source
+from app.models.evidence import Citation, ClaimEvidence, Source, SourceVerificationStatus
 from app.schemas.evidence import (
     CitationCreate,
     CitationRead,
@@ -25,10 +25,15 @@ router = APIRouter(tags=["evidence"])
 def create_source(payload: SourceCreate, db: Session = Depends(get_db), user: User | None = Depends(get_optional_user)):
     enforce_write_access(user)
     quality_score, rationale = score_source(payload.source_type, payload.publisher, payload.author)
-    source_data = payload.model_dump(exclude={"url"})
     source = Source(
-        **source_data,
-        url=str(payload.url),
+        title=payload.title,
+        url=str(payload.url) if payload.url is not None else None,
+        document_reference=payload.document_reference,
+        publisher=payload.publisher,
+        author=payload.author,
+        publication_date=payload.publication_date,
+        source_type=payload.source_type,
+        verification_status=SourceVerificationStatus.unverified,
         quality_score=quality_score,
         quality_rationale=rationale,
     )
