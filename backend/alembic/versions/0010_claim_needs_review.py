@@ -19,15 +19,15 @@ def upgrade() -> None:
     bind = op.get_bind()
     columns = {column["name"] for column in sa.inspect(bind).get_columns("claims")}
     if "needs_review" not in columns:
-        op.add_column(
-            "claims",
-            sa.Column("needs_review", sa.Boolean(), nullable=False, server_default=sa.false()),
-        )
-        op.alter_column("claims", "needs_review", server_default=None)
+        with op.batch_alter_table("claims") as batch:
+            batch.add_column(sa.Column("needs_review", sa.Boolean(), nullable=False, server_default=sa.false()))
+        with op.batch_alter_table("claims") as batch:
+            batch.alter_column("needs_review", server_default=None)
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     columns = {column["name"] for column in sa.inspect(bind).get_columns("claims")}
     if "needs_review" in columns:
-        op.drop_column("claims", "needs_review")
+        with op.batch_alter_table("claims") as batch:
+            batch.drop_column("needs_review")
