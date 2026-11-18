@@ -10,7 +10,9 @@ unmodified v1.0-rc2 baseline.
 import sqlalchemy as sa
 from alembic import op
 
+from app.models.status_history import StatusHistory
 from app.models.verification import VerificationEvent
+from app.services.legacy_status import demote_legacy_verified_without_events
 
 revision = "0005_verification_events"
 down_revision = "0004_turn_moderation"
@@ -31,47 +33,18 @@ def _ensure_postgres_labels(labels: tuple[tuple[str, str], ...]) -> None:
             op.execute(sa.text(f"ALTER TYPE {type_name} ADD VALUE IF NOT EXISTS '{value}'"))
 
 
-def _demote_verified_without_events() -> None:
-    """A baseline 'verified' flag is not a verification event.
-
-    Rows stay unverified unless verification_events already records the
-    decision. Confidence is left unchanged; it is not a verification.
-    """
-    op.execute(
-        sa.text(
-            """
-            UPDATE argument_nodes
-            SET verification_status = 'unverified'
-            WHERE verification_status = 'verified'
-              AND NOT EXISTS (
-                SELECT 1 FROM verification_events
-                WHERE subject_type = 'argument_node'
-                  AND subject_id = argument_nodes.id
-                  AND result_status = 'verified'
-              )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            UPDATE knowledge_claims
-            SET status = 'unverified'
-            WHERE status = 'verified'
-              AND NOT EXISTS (
-                SELECT 1 FROM verification_events
-                WHERE subject_type = 'knowledge_claim'
-                  AND subject_id = knowledge_claims.id
-                  AND result_status = 'verified'
-              )
-            """
-        )
-    )
+def _allow_unknown_confidence(bind) -> None:
+    columns = {column["name"]: column for column in sa.inspect(bind).get_columns("knowledge_claims")}
+    if columns["confidence_score"]["nullable"]:
+        return
+    with op.batch_alter_table("knowledge_claims") as batch:
+        batch.alter_column("confidence_score", existing_type=sa.Float(), nullable=True)
 
 
 def upgrade() -> None:
     bind = op.get_bind()
     VerificationEvent.__table__.create(bind=bind, checkfirst=True)
+    StatusHistory.__table__.create(bind=bind, checkfirst=True)
     _ensure_postgres_labels(
         (
             ("verificationstatus", "unverified"),
@@ -80,7 +53,8 @@ def upgrade() -> None:
             ("knowledgestatus", "archived"),
         )
     )
-    _demote_verified_without_events()
+    _allow_unknown_confidence(bind)
+    demote_legacy_verified_without_events(bind)
 
 
 def downgrade() -> None:
@@ -106,4 +80,16 @@ def downgrade() -> None:
                 """
             )
         )
+    # rc2 cannot store NULL confidence. Restoring a number here is only so the
+    # old column can be NOT NULL again. It does not restore verified.
+    op.execute(sa.text("UPDATE knowledge_claims SET confidence_score = 0 WHERE confidence_score IS NULL"))
+    confidence = next(
+        column
+        for column in sa.inspect(op.get_bind()).get_columns("knowledge_claims")
+        if column["name"] == "confidence_score"
+    )
+    if confidence["nullable"]:
+        with op.batch_alter_table("knowledge_claims") as batch:
+            batch.alter_column("confidence_score", existing_type=sa.Float(), nullable=False)
+    StatusHistory.__table__.drop(bind=op.get_bind(), checkfirst=True)
     VerificationEvent.__table__.drop(bind=op.get_bind(), checkfirst=True)

@@ -94,6 +94,12 @@ class ArgumentNode(Base):
     parent = relationship("ArgumentNode", remote_side=[id], back_populates="children")
     children = relationship("ArgumentNode", back_populates="parent")
     rulings = relationship("ModeratorRuling", back_populates="argument_node")
+    status_history = relationship(
+        "StatusHistory",
+        primaryjoin="and_(StatusHistory.subject_type=='argument_node', foreign(StatusHistory.subject_id)==ArgumentNode.id)",
+        viewonly=True,
+        order_by="StatusHistory.id",
+    )
 
 
 class EvidenceChallenge(Base):

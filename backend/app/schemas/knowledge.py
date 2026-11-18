@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.knowledge import ContradictionStatus, KnowledgeStatus, ResearchJobStatus
+from app.schemas.status_history import StatusHistoryRead
 
 
 class DossierCreate(BaseModel):
@@ -47,7 +48,8 @@ class KnowledgeClaimRead(BaseModel):
     normalized_body: str
     fingerprint: str
     status: KnowledgeStatus
-    confidence_score: float
+    confidence_score: float | None
+    status_history: list[StatusHistoryRead] = []
     created_at: datetime
 
 

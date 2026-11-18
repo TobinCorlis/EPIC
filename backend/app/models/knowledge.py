@@ -72,9 +72,15 @@ class KnowledgeClaim(Base):
     normalized_body: Mapped[str] = mapped_column(Text)
     fingerprint: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[KnowledgeStatus] = mapped_column(SqlEnum(KnowledgeStatus), default=KnowledgeStatus.unverified)
-    confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
+    confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    status_history = relationship(
+        "StatusHistory",
+        primaryjoin="and_(StatusHistory.subject_type=='knowledge_claim', foreign(StatusHistory.subject_id)==KnowledgeClaim.id)",
+        viewonly=True,
+        order_by="StatusHistory.id",
+    )
     dossier = relationship("TopicDossier", back_populates="knowledge_claims")
     originating_claim = relationship("Claim")
     contradictions_as_left = relationship(

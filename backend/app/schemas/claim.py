@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.claim import ClaimType
+from app.schemas.status_history import StatusHistoryRead
 
 
 class ClaimCreate(BaseModel):
@@ -20,4 +21,5 @@ class ClaimRead(BaseModel):
     citation_required: bool
     on_topic: bool
     moderation_note: str | None
+    status_notes: list[StatusHistoryRead] = []
     created_at: datetime

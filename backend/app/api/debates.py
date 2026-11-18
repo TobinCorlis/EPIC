@@ -4,9 +4,13 @@ from sqlalchemy.orm import Session
 from app.core.authorization import enforce_write_access, get_optional_user
 from app.core.database import get_db
 from app.models.auth import User, UserRole
+from app.models.argument import ArgumentNode
 from app.models.claim import Claim
 from app.models.debate import Debate
+from app.models.knowledge import KnowledgeClaim
+from app.models.status_history import StatusHistory
 from app.schemas.claim import ClaimCreate, ClaimRead
+from app.schemas.status_history import StatusHistoryRead
 from app.schemas.debate import DebateCreate, DebateRead
 from app.services.moderation import evaluate_topic_alignment
 
@@ -64,9 +68,42 @@ def add_claim(
     return claim
 
 
+def _notes_for_claim(db: Session, claim_id: int) -> list[StatusHistoryRead]:
+    argument_ids = [
+        row[0]
+        for row in db.query(ArgumentNode.id).filter(ArgumentNode.claim_id == claim_id).all()
+    ]
+    knowledge_ids = [
+        row[0]
+        for row in db.query(KnowledgeClaim.id).filter(KnowledgeClaim.originating_claim_id == claim_id).all()
+    ]
+    filters = []
+    if argument_ids:
+        filters.append((StatusHistory.subject_type == "argument_node") & (StatusHistory.subject_id.in_(argument_ids)))
+    if knowledge_ids:
+        filters.append((StatusHistory.subject_type == "knowledge_claim") & (StatusHistory.subject_id.in_(knowledge_ids)))
+    if not filters:
+        return []
+    from sqlalchemy import or_
+
+    rows = (
+        db.query(StatusHistory)
+        .filter(or_(*filters))
+        .order_by(StatusHistory.id)
+        .all()
+    )
+    return [StatusHistoryRead.model_validate(row) for row in rows]
+
+
 @router.get("/{debate_id}/claims", response_model=list[ClaimRead])
 def list_claims(debate_id: int, db: Session = Depends(get_db)):
     debate = db.get(Debate, debate_id)
     if not debate:
         raise HTTPException(status_code=404, detail="Debate not found")
-    return db.query(Claim).filter(Claim.debate_id == debate_id).order_by(Claim.id).all()
+    claims = db.query(Claim).filter(Claim.debate_id == debate_id).order_by(Claim.id).all()
+    result = []
+    for claim in claims:
+        payload = ClaimRead.model_validate(claim)
+        payload.status_notes = _notes_for_claim(db, claim.id)
+        result.append(payload)
+    return result
