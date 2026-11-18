@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.authorization import require_enforced_staff, require_enforced_writer
 from app.core.database import get_db
+from app.models.auth import User
 from app.models.claim import Claim
 from app.models.evidence import Source
 from app.models.knowledge import (
@@ -47,7 +49,11 @@ def require_dossier(db: Session, dossier_id: int) -> TopicDossier:
 
 
 @router.post("/dossiers", response_model=DossierRead, status_code=status.HTTP_201_CREATED)
-def create_dossier(payload: DossierCreate, db: Session = Depends(get_db)):
+def create_dossier(
+    payload: DossierCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     dossier = TopicDossier(**payload.model_dump())
     db.add(dossier)
     try:
@@ -65,7 +71,12 @@ def list_dossiers(db: Session = Depends(get_db)):
 
 
 @router.post("/dossiers/{dossier_id}/sources", response_model=DossierSourceRead, status_code=201)
-def add_dossier_source(dossier_id: int, payload: DossierSourceCreate, db: Session = Depends(get_db)):
+def add_dossier_source(
+    dossier_id: int,
+    payload: DossierSourceCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     require_dossier(db, dossier_id)
     if not db.get(Source, payload.source_id):
         raise HTTPException(status_code=404, detail="Source not found")
@@ -81,7 +92,12 @@ def add_dossier_source(dossier_id: int, payload: DossierSourceCreate, db: Sessio
 
 
 @router.post("/dossiers/{dossier_id}/claims", response_model=KnowledgeClaimRead, status_code=201)
-def add_knowledge_claim(dossier_id: int, payload: KnowledgeClaimCreate, db: Session = Depends(get_db)):
+def add_knowledge_claim(
+    dossier_id: int,
+    payload: KnowledgeClaimCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     require_dossier(db, dossier_id)
     if payload.originating_claim_id is not None and not db.get(Claim, payload.originating_claim_id):
         raise HTTPException(status_code=404, detail="Originating debate claim not found")
@@ -130,7 +146,12 @@ def list_knowledge_claims(dossier_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/dossiers/{dossier_id}/match-claim", response_model=list[ClaimMatchRead])
-def match_claim(dossier_id: int, payload: KnowledgeClaimCreate, db: Session = Depends(get_db)):
+def match_claim(
+    dossier_id: int,
+    payload: KnowledgeClaimCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     require_dossier(db, dossier_id)
     matches = []
     for existing in db.query(KnowledgeClaim).filter(KnowledgeClaim.dossier_id == dossier_id).all():
@@ -154,7 +175,12 @@ def list_contradictions(dossier_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/contradictions/{contradiction_id}", response_model=ContradictionRead)
-def update_contradiction(contradiction_id: int, payload: ContradictionUpdate, db: Session = Depends(get_db)):
+def update_contradiction(
+    contradiction_id: int,
+    payload: ContradictionUpdate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_staff),
+):
     contradiction = db.get(ClaimContradiction, contradiction_id)
     if not contradiction:
         raise HTTPException(status_code=404, detail="Contradiction not found")
@@ -165,7 +191,11 @@ def update_contradiction(contradiction_id: int, payload: ContradictionUpdate, db
 
 
 @router.post("/jobs", response_model=ResearchJobRead, status_code=201)
-def create_research_job(payload: ResearchJobCreate, db: Session = Depends(get_db)):
+def create_research_job(
+    payload: ResearchJobCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     if payload.dossier_id is not None:
         require_dossier(db, payload.dossier_id)
     job = ResearchJob(**payload.model_dump())
@@ -180,7 +210,11 @@ def create_research_job(payload: ResearchJobCreate, db: Session = Depends(get_db
 
 
 @router.post("/jobs/auto", response_model=ResearchJobRead, status_code=201)
-def create_auto_research_job(payload: ResearchJobCreate, db: Session = Depends(get_db)):
+def create_auto_research_job(
+    payload: ResearchJobCreate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     if payload.dossier_id is not None:
         require_dossier(db, payload.dossier_id)
     job = ResearchJob(**payload.model_dump())
@@ -191,7 +225,12 @@ def create_auto_research_job(payload: ResearchJobCreate, db: Session = Depends(g
     return job
 
 @router.patch("/jobs/{job_id}", response_model=ResearchJobRead)
-def update_research_job(job_id: int, payload: ResearchJobUpdate, db: Session = Depends(get_db)):
+def update_research_job(
+    job_id: int,
+    payload: ResearchJobUpdate,
+    db: Session = Depends(get_db),
+    _: User | None = Depends(require_enforced_writer),
+):
     job = db.get(ResearchJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Research job not found")

@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.authorization import enforce_write_access, get_optional_user
+from app.core.authorization import (
+    enforce_debate_manager,
+    enforce_debate_participant_write,
+    enforce_write_access,
+    get_optional_user,
+)
 from app.core.database import get_db
 from app.models.argument import (
     ArgumentNode,
@@ -86,9 +91,15 @@ def list_participants(debate_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/debates/{debate_id}/arguments", response_model=ArgumentNodeRead, status_code=status.HTTP_201_CREATED)
-def create_argument_node(debate_id: int, payload: ArgumentNodeCreate, db: Session = Depends(get_db)):
-    require_debate(db, debate_id)
+def create_argument_node(
+    debate_id: int,
+    payload: ArgumentNodeCreate,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
+    debate = require_debate(db, debate_id)
     participant = require_participant(db, payload.participant_id, debate_id)
+    enforce_debate_participant_write(debate, user, participant)
 
     if payload.claim_id is not None:
         claim = db.get(Claim, payload.claim_id)
@@ -151,13 +162,18 @@ def update_verification(
     status_code=status.HTTP_201_CREATED,
 )
 def create_evidence_challenge(
-    claim_evidence_id: int, payload: EvidenceChallengeCreate, db: Session = Depends(get_db)
+    claim_evidence_id: int,
+    payload: EvidenceChallengeCreate,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     link = db.get(ClaimEvidence, claim_evidence_id)
     if not link:
         raise HTTPException(status_code=404, detail="Claim-evidence link not found")
     claim = db.get(Claim, link.claim_id)
+    debate = require_debate(db, claim.debate_id)
     challenger = require_participant(db, payload.challenger_id, claim.debate_id)
+    enforce_debate_participant_write(debate, user, challenger)
     challenge = EvidenceChallenge(
         claim_evidence_id=claim_evidence_id,
         challenger_id=challenger.id,
@@ -172,11 +188,18 @@ def create_evidence_challenge(
 
 @router.patch("/challenges/{challenge_id}", response_model=EvidenceChallengeRead)
 def update_evidence_challenge(
-    challenge_id: int, payload: EvidenceChallengeUpdate, db: Session = Depends(get_db)
+    challenge_id: int,
+    payload: EvidenceChallengeUpdate,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
 ):
     challenge = db.get(EvidenceChallenge, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Evidence challenge not found")
+    link = db.get(ClaimEvidence, challenge.claim_evidence_id)
+    claim = db.get(Claim, link.claim_id)
+    debate = require_debate(db, claim.debate_id)
+    enforce_debate_manager(debate, user)
     challenge.status = payload.status
     challenge.response = payload.response
     if payload.status in {ChallengeStatus.upheld, ChallengeStatus.denied, ChallengeStatus.withdrawn}:

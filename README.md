@@ -125,6 +125,16 @@ See `docs/PRODUCTION_DEPLOYMENT.md` for security and release requirements. Local
 
 Production deployments now use Alembic migrations and can enforce authenticated writes with `ENFORCE_AUTHORIZATION=true`. Debates record an owning user, account roles are `member`, `moderator`, and `administrator`, and protected debate-management operations allow only the owner or authorized platform staff.
 
+With enforcement on, knowledge writes, argument creation, and evidence-challenge creation also require a logged-in user. Argument and challenge creation is limited to the debate owner, platform staff, or the participant linked to that user. Resolving a challenge, and confirming or dismissing a contradiction, is limited to the debate owner or staff (contradiction review: moderator or administrator).
+
+Create the first administrator from `backend/` after the schema exists:
+
+```bash
+python -m app.cli create-admin --email admin@example.com --name "EPIC Admin" --password "replace-this-password"
+```
+
+The command refuses to run once any administrator account exists.
+
 Run migrations from `backend/` with:
 
 ```bash

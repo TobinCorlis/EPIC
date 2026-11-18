@@ -45,3 +45,43 @@ def require_role(*roles: UserRole):
 def enforce_write_access(user: User | None) -> None:
     if settings.enforce_authorization and user is None:
         raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def require_enforced_writer(user: User | None = Depends(get_optional_user)) -> User | None:
+    """Dependency for knowledge writes. Login is required only when enforcement is on."""
+    enforce_write_access(user)
+    return user
+
+
+def require_enforced_staff(user: User | None = Depends(get_optional_user)) -> User | None:
+    """Review actions require a moderator or administrator when enforcement is on."""
+    enforce_write_access(user)
+    if settings.enforce_authorization and user.role not in {UserRole.moderator, UserRole.administrator}:
+        raise HTTPException(status_code=403, detail="Only a moderator or administrator may perform this action")
+    return user
+
+
+def enforce_debate_participant_write(debate, user: User | None, participant) -> None:
+    """Argument and challenge creation: owner, staff, or the linked participant."""
+    enforce_write_access(user)
+    if not settings.enforce_authorization:
+        return
+    if user.role in {UserRole.moderator, UserRole.administrator}:
+        return
+    if debate.owner_user_id is not None and debate.owner_user_id == user.id:
+        return
+    if participant is not None and participant.user_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="You do not have permission to write in this debate")
+
+
+def enforce_debate_manager(debate, user: User | None) -> None:
+    """Resolving a challenge is limited to the debate owner or platform staff."""
+    enforce_write_access(user)
+    if not settings.enforce_authorization:
+        return
+    if user.role in {UserRole.moderator, UserRole.administrator}:
+        return
+    if debate.owner_user_id is not None and debate.owner_user_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Only the debate owner or platform staff may resolve this challenge")
