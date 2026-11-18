@@ -63,6 +63,7 @@ Evidence is listed item by item. A self-declared source type stays unverified, a
 5. Challenge a specific claim-evidence relationship with a stated reason and requested remedy.
 6. Allow a moderator or designated AI assistant to issue a reasoned ruling.
 7. Retrieve the debate's ruling history as an audit trail.
+8. Record an uncertainty or gap on a claim. A correction keeps the original text, the replacement, the reason, the time, and the author. Claim reads and debate exports include that log.
 
 
 ## Research and knowledge bank (v0.3)

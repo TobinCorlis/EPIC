@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.knowledge import ContradictionStatus, KnowledgeStatus, ResearchJobStatus
+from app.schemas.claim import CorrectionRead
 from app.schemas.status_history import StatusHistoryRead
 
 
@@ -36,6 +37,7 @@ class KnowledgeClaimCreate(BaseModel):
 
     body: str = Field(min_length=3)
     originating_claim_id: int | None = None
+    uncertainty: str | None = Field(default=None, max_length=4000)
 
 
 class KnowledgeClaimRead(BaseModel):
@@ -49,6 +51,8 @@ class KnowledgeClaimRead(BaseModel):
     fingerprint: str
     status: KnowledgeStatus
     confidence_score: float | None
+    uncertainty: str | None = None
+    corrections: list[CorrectionRead] = []
     status_history: list[StatusHistoryRead] = []
     created_at: datetime
 

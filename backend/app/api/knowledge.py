@@ -109,6 +109,7 @@ def add_knowledge_claim(
         fingerprint=fingerprint_claim(payload.body),
         status=KnowledgeStatus.unverified,
         confidence_score=0.0,
+        uncertainty=(payload.uncertainty or "").strip() or None,
     )
     db.add(item)
     try:
