@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -36,6 +36,9 @@ class VerificationEvent(Base):
     method: Mapped[str] = mapped_column(String(200))
     archive_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     snapshot_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    mistake_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mistake_recorded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    mistake_recorded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
-    actor = relationship("User")
+    actor = relationship("User", foreign_keys=[actor_user_id])

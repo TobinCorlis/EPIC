@@ -36,4 +36,10 @@ class VerificationEventRead(BaseModel):
     method: str
     archive_url: str | None
     snapshot_hash: str | None
+    mistake_reason: str | None = None
+    mistake_recorded_at: datetime | None = None
     created_at: datetime
+
+
+class VerificationMistakeCreate(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)

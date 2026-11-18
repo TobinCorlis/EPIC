@@ -9,7 +9,8 @@ from app.models.auth import User
 from app.models.evidence import Source, SourceVerificationStatus
 from app.models.knowledge import KnowledgeClaim, KnowledgeStatus
 from app.models.verification import RecordedVerificationStatus, VerificationEvent, VerificationSubject
-from app.schemas.verification import VerificationEventCreate, VerificationEventRead
+from app.schemas.verification import VerificationEventCreate, VerificationEventRead, VerificationMistakeCreate
+from app.services.verification_history import record_verification_mistake
 from app.core.clock import utcnow
 
 router = APIRouter(prefix="/verification-events", tags=["verification"])
@@ -76,3 +77,19 @@ def list_verification_events(
         .order_by(VerificationEvent.id)
         .all()
     )
+
+
+@router.post("/{event_id}/mistake", response_model=VerificationEventRead)
+def mark_verification_mistake(
+    event_id: int,
+    payload: VerificationMistakeCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_authenticated),
+):
+    event = db.get(VerificationEvent, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Verification event not found")
+    record_verification_mistake(db, event, user, payload.reason)
+    db.commit()
+    db.refresh(event)
+    return event
