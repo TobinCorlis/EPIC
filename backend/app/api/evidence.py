@@ -20,6 +20,7 @@ from app.schemas.evidence import (
     SourceRead,
     SourceTypeReview,
 )
+from app.services.claim_confidence import AUTOMATED_SOURCE_CHECK, AUTOMATED_SOURCE_CHECK_DETAIL, assess_claim, source_record
 from app.services.evidence_scoring import score_source, summarize_evidence
 
 router = APIRouter(tags=["evidence"])
@@ -104,6 +105,8 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
         .all()
     )
     summary = summarize_evidence(links)
+    confidence = assess_claim(db, claim_id)
+    db.commit()
     return ClaimEvidenceSummary(
         claim_id=claim_id,
         items=[EvidenceItemRead(**item.__dict__) for item in summary.items],
@@ -111,7 +114,25 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
         independent_source_count=summary.independent_source_count,
         citation_count=summary.citation_count,
         citation_requirement_met=(not claim.citation_required) or summary.citation_count > 0,
+        confidence={"claim_id": claim_id, **confidence},
     )
+
+
+@router.get("/sources/{source_id}/record")
+def get_source_record(source_id: int, db: Session = Depends(get_db)):
+    if not db.get(Source, source_id):
+        raise HTTPException(status_code=404, detail="Source not found")
+    record = source_record(db, source_id)
+    return {
+        "source_id": source_id,
+        "corrected": record.corrected,
+        "retracted": record.retracted,
+        "found_false": record.found_false,
+        "confirmed": record.confirmed,
+        "track_factor": record.track_factor,
+        "automated_source_check": AUTOMATED_SOURCE_CHECK,
+        "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
+    }
 
 
 @router.post("/sources/{source_id}/source-type-review", response_model=SourceRead)
