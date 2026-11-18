@@ -113,6 +113,14 @@ class EvidenceItemRead(BaseModel):
     tier_rank: int
     independence_key: str
     claim_supported: str
+    source_id: int | None = None
+    source_title: str | None = None
+    scope_population: str | None = None
+    scope_timeframe: str | None = None
+    scope_geography: str | None = None
+    scope_metric: str | None = None
+    scope_study_type: str | None = None
+    scope_sample_size: int | None = None
 
 
 class ConfidenceFactorRead(BaseModel):
@@ -133,6 +141,7 @@ class ScopeFlagRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    claim_evidence_id: int | None = None
     kind: str
     dimension: str
     source_text: str

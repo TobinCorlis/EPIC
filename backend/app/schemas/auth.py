@@ -1,14 +1,20 @@
 from datetime import datetime
+from typing import Annotated
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+from app.core.email import normalize_email
 from app.models.auth import UserRole
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+EmailAddress = Annotated[str, BeforeValidator(normalize_email)]
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: EmailAddress
     display_name: str = Field(min_length=2, max_length=120)
     password: str = Field(min_length=8, max_length=128)
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: EmailAddress
     password: str
 
 class UserRead(BaseModel):

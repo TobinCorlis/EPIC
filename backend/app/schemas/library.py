@@ -38,6 +38,7 @@ class LibraryVersionRead(BaseModel):
     outcome: str
     winning_source_id: int | None
     winning_reason: str | None
+    confidence: list | None = None
     created_at: datetime
 
 
@@ -98,6 +99,26 @@ class InvalidationCreate(BaseModel):
     source_id: int
 
 
+class LibrarySourceBrief(BaseModel):
+    id: int
+    title: str
+    url: str | None = None
+    document_reference: str | None = None
+
+
+class LibraryClaimBrief(BaseModel):
+    id: int
+    body: str
+
+
+class LibraryVerificationBrief(BaseModel):
+    id: int
+    subject_type: str
+    result_status: str
+    method: str
+    mistake_reason: str | None = None
+
+
 class LibraryEntryRead(BaseModel):
     id: int
     question: str
@@ -111,7 +132,10 @@ class LibraryEntryRead(BaseModel):
     current_version: LibraryVersionRead | None
     versions: list[LibraryVersionRead]
     supporting_claim_ids: list[int]
+    supporting_claims: list[LibraryClaimBrief] = []
     source_ids: list[int]
+    sources: list[LibrarySourceBrief] = []
     verification_event_ids: list[int]
+    verifications: list[LibraryVerificationBrief] = []
     requests: list[ReevaluationRead]
     created_at: datetime

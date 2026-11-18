@@ -1,12 +1,18 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from typing import Annotated
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+from app.core.email import normalize_email
+
+EmailAddress = Annotated[str, BeforeValidator(normalize_email)]
 
 from app.models.argument import DebateSide, ParticipantRole
 from app.models.collaboration import InvitationStatus
 
 
 class InvitationCreate(BaseModel):
-    invited_email: EmailStr | None = None
+    invited_email: EmailAddress | None = None
     participant_role: ParticipantRole = ParticipantRole.debater
     side: DebateSide = DebateSide.neutral
     expires_in_hours: int = Field(default=72, ge=1, le=720)
