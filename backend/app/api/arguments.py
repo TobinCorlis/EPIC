@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +9,7 @@ from app.core.authorization import (
     enforce_write_access,
     get_optional_user,
 )
+from app.core.clock import utcnow
 from app.core.database import get_db
 from app.models.argument import (
     ArgumentNode,
@@ -203,7 +203,7 @@ def update_evidence_challenge(
     challenge.status = payload.status
     challenge.response = payload.response
     if payload.status in {ChallengeStatus.upheld, ChallengeStatus.denied, ChallengeStatus.withdrawn}:
-        challenge.resolved_at = datetime.utcnow()
+        challenge.resolved_at = utcnow()
     else:
         challenge.resolved_at = None
     db.commit()
@@ -248,10 +248,10 @@ def create_moderator_ruling(
     if challenge is not None:
         if payload.outcome == RulingOutcome.challenge_upheld:
             challenge.status = ChallengeStatus.upheld
-            challenge.resolved_at = datetime.utcnow()
+            challenge.resolved_at = utcnow()
         elif payload.outcome == RulingOutcome.challenge_denied:
             challenge.status = ChallengeStatus.denied
-            challenge.resolved_at = datetime.utcnow()
+            challenge.resolved_at = utcnow()
 
     if node is not None:
         # Rulings are procedural. They do not verify or archive a claim.

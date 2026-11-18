@@ -1,4 +1,3 @@
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -11,6 +10,7 @@ from app.models.evidence import Source, SourceVerificationStatus
 from app.models.knowledge import KnowledgeClaim, KnowledgeStatus
 from app.models.verification import RecordedVerificationStatus, VerificationEvent, VerificationSubject
 from app.schemas.verification import VerificationEventCreate, VerificationEventRead
+from app.core.clock import utcnow
 
 router = APIRouter(prefix="/verification-events", tags=["verification"])
 
@@ -36,7 +36,7 @@ def _apply_status(db: Session, payload: VerificationEventCreate) -> None:
     if payload.archive_url:
         source.archive_url = payload.archive_url
     if payload.result_status == RecordedVerificationStatus.archived:
-        source.archived_at = datetime.utcnow()
+        source.archived_at = utcnow()
 
 
 @router.post("", response_model=VerificationEventRead, status_code=status.HTTP_201_CREATED)

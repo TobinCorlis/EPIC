@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, String, Text, Uniq
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class DebateSide(str, Enum):
@@ -64,7 +65,7 @@ class Participant(Base):
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     role: Mapped[ParticipantRole] = mapped_column(SqlEnum(ParticipantRole), default=ParticipantRole.debater)
     side: Mapped[DebateSide] = mapped_column(SqlEnum(DebateSide), default=DebateSide.neutral)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     debate = relationship("Debate", back_populates="participants")
     argument_nodes = relationship("ArgumentNode", back_populates="participant")
@@ -86,7 +87,7 @@ class ArgumentNode(Base):
     verification_status: Mapped[VerificationStatus] = mapped_column(
         SqlEnum(VerificationStatus), default=VerificationStatus.unverified
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     debate = relationship("Debate", back_populates="argument_nodes")
     participant = relationship("Participant", back_populates="argument_nodes")
@@ -112,7 +113,7 @@ class EvidenceChallenge(Base):
     requested_remedy: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ChallengeStatus] = mapped_column(SqlEnum(ChallengeStatus), default=ChallengeStatus.open)
     response: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     evidence_link = relationship("ClaimEvidence", back_populates="challenges")
@@ -131,7 +132,7 @@ class ModeratorRuling(Base):
     outcome: Mapped[RulingOutcome] = mapped_column(SqlEnum(RulingOutcome))
     rationale: Mapped[str] = mapped_column(Text)
     rule_reference: Mapped[str | None] = mapped_column(String(250), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     debate = relationship("Debate", back_populates="rulings")
     moderator = relationship("Participant", back_populates="rulings")

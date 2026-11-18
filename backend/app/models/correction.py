@@ -4,6 +4,7 @@ from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class ClaimCorrection(Base):
@@ -27,7 +28,7 @@ class ClaimCorrection(Base):
     corrected_body: Mapped[str] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text)
     author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     claim = relationship("Claim", back_populates="corrections")
     knowledge_claim = relationship("KnowledgeClaim", back_populates="corrections")

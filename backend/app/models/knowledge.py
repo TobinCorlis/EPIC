@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, St
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class KnowledgeStatus(str, Enum):
@@ -40,8 +41,8 @@ class TopicDossier(Base):
     title: Mapped[str] = mapped_column(String(250), unique=True, index=True)
     question: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     sources = relationship("DossierSource", back_populates="dossier", cascade="all, delete-orphan")
     knowledge_claims = relationship("KnowledgeClaim", back_populates="dossier", cascade="all, delete-orphan")
@@ -56,7 +57,7 @@ class DossierSource(Base):
     dossier_id: Mapped[int] = mapped_column(ForeignKey("topic_dossiers.id"), index=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     dossier = relationship("TopicDossier", back_populates="sources")
     source = relationship("Source")
@@ -75,7 +76,7 @@ class KnowledgeClaim(Base):
     status: Mapped[KnowledgeStatus] = mapped_column(SqlEnum(KnowledgeStatus), default=KnowledgeStatus.unverified)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
     uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     status_history = relationship(
         "StatusHistory",
@@ -108,7 +109,7 @@ class ClaimContradiction(Base):
     status: Mapped[ContradictionStatus] = mapped_column(
         SqlEnum(ContradictionStatus), default=ContradictionStatus.detected
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     left_claim = relationship("KnowledgeClaim", foreign_keys=[left_claim_id], back_populates="contradictions_as_left")
     right_claim = relationship("KnowledgeClaim", foreign_keys=[right_claim_id], back_populates="contradictions_as_right")
@@ -127,8 +128,8 @@ class ResearchJob(Base):
     current_step: Mapped[str] = mapped_column(String(250), default="Queued")
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     worker_id: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
@@ -146,6 +147,6 @@ class ResearchJobEvent(Base):
     progress_percent: Mapped[int] = mapped_column(Integer)
     step: Mapped[str] = mapped_column(String(250))
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     job = relationship("ResearchJob", back_populates="events")

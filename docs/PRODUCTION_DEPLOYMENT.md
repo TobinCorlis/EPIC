@@ -6,7 +6,7 @@ Run three independently restartable components:
 
 1. **Web API** — FastAPI/Uvicorn behind an HTTPS reverse proxy or managed load balancer.
 2. **PostgreSQL** — persistent relational storage.
-3. **Research worker** — `python -m app.services.research_worker`; jobs remain queued in PostgreSQL when processes restart.
+3. **Research worker** — `python -m app.services.research_worker`. The process is durable, but automated research is not implemented: a claimed job is marked `not_implemented` and is not given a result summary.
 
 ## Required production settings
 

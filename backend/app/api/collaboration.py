@@ -1,7 +1,7 @@
 import asyncio
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +18,7 @@ from app.schemas.argument import ParticipantRead
 from app.schemas.collaboration import DebateEventRead, InvitationAccept, InvitationCreate, InvitationRead, TurnCreate, TurnRead, RoomStateRead, RoomConfigure, TurnPreview, TurnAnalysisRead, ModerationReviewRead, ModerationDecision
 from app.services.realtime import event_dict, manager, record_event
 from app.services.turn_moderation import analyze_turn
+from app.core.clock import utcnow
 
 router = APIRouter(tags=["collaboration"])
 
@@ -47,7 +48,7 @@ def create_invitation(
         participant_role=payload.participant_role.value,
         side=payload.side.value,
         max_uses=payload.max_uses,
-        expires_at=datetime.utcnow() + timedelta(hours=payload.expires_in_hours),
+        expires_at=utcnow() + timedelta(hours=payload.expires_in_hours),
     )
     db.add(invite)
     db.commit(); db.refresh(invite)
@@ -69,7 +70,7 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db), 
     invite = db.query(DebateInvitation).filter(DebateInvitation.token_hash == token_digest(payload.token)).first()
     if not invite:
         raise HTTPException(404, "Invitation not found")
-    if invite.status != InvitationStatus.pending or invite.expires_at <= datetime.utcnow():
+    if invite.status != InvitationStatus.pending or invite.expires_at <= utcnow():
         raise HTTPException(410, "Invitation is no longer valid")
     if invite.invited_email and invite.invited_email != user.email.lower():
         raise HTTPException(403, "This invitation was issued to a different email address")
@@ -119,7 +120,7 @@ def websocket_user(db: Session, token: str | None) -> User | None:
     if not token:
         return None
     session = db.query(AuthSession).filter(AuthSession.token_hash == token_digest(token)).first()
-    if not session or session.expires_at <= datetime.utcnow():
+    if not session or session.expires_at <= utcnow():
         return None
     return db.get(User, session.user_id)
 
@@ -175,7 +176,7 @@ def ensure_room_access(db: Session, debate: Debate, user: User) -> Participant |
 def state_payload(state: DebateRoomState) -> dict:
     remaining = None
     if state.current_participant_id and state.turn_started_at:
-        elapsed = (datetime.utcnow() - state.turn_started_at).total_seconds()
+        elapsed = (utcnow() - state.turn_started_at).total_seconds()
         remaining = max(0, state.turn_duration_seconds - int(elapsed))
     return {
         "debate_id": state.debate_id,
@@ -200,7 +201,7 @@ def advance_state(db: Session, state: DebateRoomState):
         next_id = ids[(ids.index(state.current_participant_id) + 1) % len(ids)]
     state.current_participant_id = next_id
     state.turn_sequence += 1
-    state.turn_started_at = datetime.utcnow()
+    state.turn_started_at = utcnow()
 
 
 @router.put("/debates/{debate_id}/room", response_model=RoomStateRead)
@@ -215,7 +216,7 @@ def configure_room(debate_id: int, payload: RoomConfigure, db: Session = Depends
     state = db.get(DebateRoomState, debate_id) or DebateRoomState(debate_id=debate_id)
     state.turn_duration_seconds = payload.turn_duration_seconds
     state.current_participant_id = payload.first_participant_id or (participants[0].id if participants else None)
-    state.turn_started_at = datetime.utcnow() if state.current_participant_id else None
+    state.turn_started_at = utcnow() if state.current_participant_id else None
     if not db.get(DebateRoomState, debate_id): db.add(state)
     event = record_event(db, debate_id, "room.configured", state_payload(state), user.id)
     db.commit(); db.refresh(state)
@@ -281,12 +282,12 @@ def decide_moderation_review(review_id: int, payload: ModerationDecision, db: Se
     debate = db.get(Debate, review.debate_id); require_manager(debate, user)
     if review.status != ModerationReviewStatus.pending: raise HTTPException(409, "Review has already been resolved")
     review.status = ModerationReviewStatus.approved if payload.approve else ModerationReviewStatus.rejected
-    review.moderator_user_id = user.id; review.moderator_note = payload.note; review.resolved_at = datetime.utcnow()
+    review.moderator_user_id = user.id; review.moderator_note = payload.note; review.resolved_at = utcnow()
     if payload.approve:
         state = db.get(DebateRoomState, review.debate_id)
         if not state or state.current_participant_id != review.participant_id:
             raise HTTPException(409, "The participant is no longer the current speaker")
-        now = datetime.utcnow()
+        now = utcnow()
         turn = DebateTurn(debate_id=review.debate_id, participant_id=review.participant_id, sequence_number=state.turn_sequence, body=review.body, status=TurnStatus.completed, started_at=state.turn_started_at or now, submitted_at=now)
         db.add(turn); db.flush()
         record_event(db, review.debate_id, "turn.moderator_approved", {"turn_id": turn.id, "review_id": review.id, "participant_id": review.participant_id}, user.id)
@@ -309,7 +310,7 @@ def submit_turn(debate_id: int, payload: TurnCreate, db: Session = Depends(get_d
         raise HTTPException(409, "The debate room has not been started")
     if state.current_participant_id != participant.id:
         raise HTTPException(409, "It is not your turn")
-    now = datetime.utcnow()
+    now = utcnow()
     if state.turn_started_at and (now - state.turn_started_at).total_seconds() > state.turn_duration_seconds:
         expired = DebateTurn(debate_id=debate_id, participant_id=participant.id, sequence_number=state.turn_sequence, body="", status=TurnStatus.expired, started_at=state.turn_started_at, submitted_at=now)
         db.add(expired); advance_state(db, state); record_event(db, debate_id, "turn.expired", {"participant_id": participant.id, "sequence_number": expired.sequence_number}, user.id); db.commit()
@@ -342,7 +343,7 @@ def skip_turn(debate_id: int, db: Session = Depends(get_db), user: User = Depend
     state = db.get(DebateRoomState, debate_id)
     if not state or not state.current_participant_id: raise HTTPException(409, "The debate room has not been started")
     skipped_id = state.current_participant_id
-    db.add(DebateTurn(debate_id=debate_id, participant_id=skipped_id, sequence_number=state.turn_sequence, body="", status=TurnStatus.skipped, started_at=state.turn_started_at or datetime.utcnow(), submitted_at=datetime.utcnow()))
+    db.add(DebateTurn(debate_id=debate_id, participant_id=skipped_id, sequence_number=state.turn_sequence, body="", status=TurnStatus.skipped, started_at=state.turn_started_at or utcnow(), submitted_at=utcnow()))
     advance_state(db, state)
     record_event(db, debate_id, "turn.skipped", {"participant_id": skipped_id, "current_participant_id": state.current_participant_id, "turn_sequence": state.turn_sequence}, user.id)
     db.commit(); db.refresh(state)

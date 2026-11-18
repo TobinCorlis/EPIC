@@ -5,6 +5,7 @@ from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, T
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+from app.core.clock import utcnow
 
 
 class InvitationStatus(str, Enum):
@@ -28,7 +29,7 @@ class DebateInvitation(Base):
     max_uses: Mapped[int] = mapped_column(Integer, default=1)
     use_count: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class DebateEvent(Base):
@@ -39,7 +40,7 @@ class DebateEvent(Base):
     event_type: Mapped[str] = mapped_column(String(80), index=True)
     actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     payload_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 class TurnStatus(str, Enum):
     active = "active"
@@ -57,8 +58,8 @@ class DebateTurn(Base):
     sequence_number: Mapped[int] = mapped_column(Integer, index=True)
     body: Mapped[str] = mapped_column(Text)
     status: Mapped[TurnStatus] = mapped_column(SqlEnum(TurnStatus), default=TurnStatus.completed, index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    submitted_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class DebateRoomState(Base):
@@ -69,7 +70,7 @@ class DebateRoomState(Base):
     turn_duration_seconds: Mapped[int] = mapped_column(Integer, default=300)
     turn_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     turn_sequence: Mapped[int] = mapped_column(Integer, default=0)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 class ModerationReviewStatus(str, Enum):
     pending = "pending"
@@ -90,5 +91,5 @@ class TurnModerationReview(Base):
     status: Mapped[ModerationReviewStatus] = mapped_column(SqlEnum(ModerationReviewStatus), default=ModerationReviewStatus.pending, index=True)
     moderator_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     moderator_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
