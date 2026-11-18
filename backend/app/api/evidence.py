@@ -18,6 +18,7 @@ from app.schemas.evidence import (
     EvidenceLinkRead,
     SourceCreate,
     SourceRead,
+    SourceRecordReview,
     SourceTypeReview,
 )
 from app.services.claim_confidence import AUTOMATED_SOURCE_CHECK, AUTOMATED_SOURCE_CHECK_DETAIL, assess_claim, source_record
@@ -159,6 +160,29 @@ def get_source_record(source_id: int, db: Session = Depends(get_db)):
         "automated_source_check": AUTOMATED_SOURCE_CHECK,
         "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
     }
+
+
+@router.post("/sources/{source_id}/record-review", response_model=SourceRead)
+def review_source_record(
+    source_id: int,
+    payload: SourceRecordReview,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role(UserRole.moderator, UserRole.administrator)),
+):
+    """Record a human check that a cited source was found, or that no record exists.
+
+    Automated lookup is not implemented. This does not fetch the source.
+    """
+    source = db.get(Source, source_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    source.record_status = payload.status
+    source.record_note = payload.note.strip()
+    source.record_checked_by_user_id = user.id
+    source.record_checked_at = utcnow()
+    db.commit()
+    db.refresh(source)
+    return source
 
 
 @router.post("/sources/{source_id}/source-type-review", response_model=SourceRead)

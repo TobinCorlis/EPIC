@@ -47,6 +47,12 @@ from app.services.research_worker import enqueue_research_job
 router = APIRouter(prefix="/library", tags=["library"])
 
 
+def _request_read(item: ReevaluationRequest, names: dict[int, str]) -> ReevaluationRead:
+    row = ReevaluationRead.model_validate(item)
+    row.requested_by_display_name = names.get(item.requested_by_user_id)
+    return row
+
+
 def _guard(action):
     try:
         return action()
@@ -69,6 +75,10 @@ def _version_read(version: ReferenceEntryVersion) -> LibraryVersionRead:
 
 
 def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
+    from app.services.reference_library import ensure_entry_status
+
+    ensure_entry_status(db, entry)
+    db.commit()
     versions = (
         db.query(ReferenceEntryVersion)
         .filter(ReferenceEntryVersion.entry_id == entry.id)
@@ -98,12 +108,18 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
         label = "re-evaluation pending"
     elif entry.stale:
         label = "stale"
+    elif entry.needs_review:
+        label = "needs review"
     requests = (
         db.query(ReevaluationRequest)
         .filter(ReevaluationRequest.entry_id == entry.id)
         .order_by(ReevaluationRequest.id)
         .all()
     )
+    user_ids = {item.requested_by_user_id for item in requests}
+    names = {}
+    if user_ids:
+        names = {user.id: user.display_name for user in db.query(User).filter(User.id.in_(user_ids)).all()}
     return LibraryEntryRead(
         id=entry.id,
         question=entry.question,
@@ -113,6 +129,7 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
         question_metric=entry.question_metric,
         stale=entry.stale,
         reevaluation_pending=entry.reevaluation_pending,
+        needs_review=entry.needs_review,
         status_label=label,
         current_version=_version_read(current) if current else None,
         versions=[_version_read(version) for version in versions],
@@ -139,7 +156,7 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
             )
             for event in events
         ],
-        requests=[ReevaluationRead.model_validate(item) for item in requests],
+        requests=[_request_read(item, names) for item in requests],
         created_at=entry.created_at,
     )
 

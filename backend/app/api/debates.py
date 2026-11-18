@@ -124,6 +124,14 @@ def list_claims(debate_id: int, db: Session = Depends(get_db)):
     result = []
     for claim in claims:
         annotate_point(db, claim, claim_id=claim.id)
+        from app.models.library import ReevaluationRequest
+
+        claim.reevaluation_pending = (
+            db.query(ReevaluationRequest)
+            .filter(ReevaluationRequest.claim_id == claim.id, ReevaluationRequest.status == "open")
+            .first()
+            is not None
+        )
         payload = ClaimRead.model_validate(claim)
         payload.status_notes = _notes_for_claim(db, claim.id)
         result.append(payload)

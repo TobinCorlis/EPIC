@@ -32,6 +32,18 @@ def test_upheld_challenge_overturns_verified_claim_and_mistake_relabels_history(
         "/sources",
         json={"title": "Agency report", "url": "https://example.gov/hours-overturn", "source_type": "government_record"},
     ).json()
+    from app.core.database import SessionLocal
+    from app.models.auth import User, UserRole
+    with SessionLocal() as db:
+        user = db.get(User, headers["user"]["id"])
+        user.role = UserRole.moderator
+        db.commit()
+    reviewed = client.post(
+        f"/sources/{source['id']}/source-type-review",
+        headers={"Authorization": headers["Authorization"]},
+        json={"note": "The published type matches the document."},
+    )
+    assert reviewed.status_code == 200, reviewed.text
     citation = client.post("/citations", json={"source_id": source["id"], "locator": "p. 4"}).json()
     link = client.post(
         f"/claims/{claim['id']}/evidence",
