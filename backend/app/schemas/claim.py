@@ -22,6 +22,10 @@ class ClaimCreate(BaseModel):
     body: str = Field(min_length=2)
     claim_type: ClaimType = ClaimType.factual
     uncertainty: str | None = Field(default=None, max_length=4000)
+    scope_population: str | None = Field(default=None, max_length=300)
+    scope_timeframe: str | None = Field(default=None, max_length=300)
+    scope_geography: str | None = Field(default=None, max_length=300)
+    scope_metric: str | None = Field(default=None, max_length=300)
 
 
 class ClaimRead(BaseModel):
@@ -36,6 +40,10 @@ class ClaimRead(BaseModel):
     needs_review: bool = False
     moderation_note: str | None
     uncertainty: str | None = None
+    scope_population: str | None = None
+    scope_timeframe: str | None = None
+    scope_geography: str | None = None
+    scope_metric: str | None = None
     corrections: list[CorrectionRead] = []
     status_notes: list[StatusHistoryRead] = []
     created_at: datetime
