@@ -1,0 +1,20 @@
+EPIC 1.0 RC1 — QUICK START
+
+WINDOWS
+1. Install Python 3.11 or newer from python.org.
+2. Extract this ZIP.
+3. Open the scripts folder.
+4. Double-click start_epic_windows.bat.
+5. When the browser opens, register your account.
+
+MAC OR LINUX
+1. Open Terminal in the extracted EPIC folder.
+2. Run: ./scripts/start_epic.sh
+3. Open: http://127.0.0.1:8000
+
+YOUR LOCAL DATA
+Your local debates and accounts are saved in backend/epic.db.
+Keep that file to preserve your local EPIC data.
+
+STOPPING EPIC
+Return to the terminal window and press Ctrl+C.
