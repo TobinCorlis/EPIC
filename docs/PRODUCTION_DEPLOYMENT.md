@@ -45,3 +45,11 @@ Set `AUTO_CREATE_SCHEMA=false`, then run `alembic upgrade head` as a release ste
 ## Authorization
 
 Set `ENFORCE_AUTHORIZATION=true` in production. Write operations require a valid bearer session. Debate-management actions are restricted to the debate owner, moderators, or administrators, while administrator-only account changes are exposed under `/admin`.
+
+Knowledge writes, argument creation, and evidence challenges follow the same flag. After `alembic upgrade head`, create the first administrator from `backend/`:
+
+```bash
+python -m app.cli create-admin --email admin@example.com --name "EPIC Admin" --password "replace-this-password"
+```
+
+The command creates one administrator and then refuses to create another.
