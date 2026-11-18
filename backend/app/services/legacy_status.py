@@ -27,7 +27,7 @@ def demote_legacy_verified_without_events(connection: Connection) -> None:
                 SELECT 1 FROM verification_events
                 WHERE subject_type = 'knowledge_claim'
                   AND subject_id = knowledge_claims.id
-                  AND result_status = knowledge_claims.status
+                  AND CAST(result_status AS TEXT) = CAST(knowledge_claims.status AS TEXT)
               )
             """
         ),
@@ -43,7 +43,7 @@ def demote_legacy_verified_without_events(connection: Connection) -> None:
                 SELECT 1 FROM verification_events
                 WHERE subject_type = 'knowledge_claim'
                   AND subject_id = knowledge_claims.id
-                  AND result_status = knowledge_claims.status
+                  AND CAST(result_status AS TEXT) = CAST(knowledge_claims.status AS TEXT)
               )
             """
         )
@@ -64,7 +64,7 @@ def demote_legacy_verified_without_events(connection: Connection) -> None:
                 SELECT 1 FROM verification_events
                 WHERE subject_type = 'argument_node'
                   AND subject_id = argument_nodes.id
-                  AND result_status = argument_nodes.verification_status
+                  AND CAST(result_status AS TEXT) = CAST(argument_nodes.verification_status AS TEXT)
               )
             """
         ),
@@ -80,7 +80,7 @@ def demote_legacy_verified_without_events(connection: Connection) -> None:
                 SELECT 1 FROM verification_events
                 WHERE subject_type = 'argument_node'
                   AND subject_id = argument_nodes.id
-                  AND result_status = argument_nodes.verification_status
+                  AND CAST(result_status AS TEXT) = CAST(argument_nodes.verification_status AS TEXT)
               )
             """
         )
