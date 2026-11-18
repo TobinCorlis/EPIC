@@ -35,7 +35,7 @@ def export_debate_json(debate_id: int, db: Session = Depends(get_db)):
     return {
         "debate": {"id": debate.id, "title": debate.title, "fixed_question": debate.fixed_question, "description": debate.description, "status": debate.status.value if hasattr(debate.status, "value") else str(debate.status)},
         "participants": [{"id": p.id, "name": p.display_name, "role": p.role.value, "side": p.side.value} for p in participants],
-        "claims": [{"id": c.id, "body": c.body, "claim_type": c.claim_type.value, "citation_required": c.citation_required, "on_topic": c.on_topic, "moderation_note": c.moderation_note} for c in claims],
+        "claims": [{"id": c.id, "body": c.body, "claim_type": c.claim_type.value, "citation_required": c.citation_required, "on_topic": c.on_topic, "moderation_note": c.moderation_note, "uncertainty": c.uncertainty, "corrections": [{"id": item.id, "original_body": item.original_body, "corrected_body": item.corrected_body, "reason": item.reason, "author_user_id": item.author_user_id, "created_at": item.created_at.isoformat()} for item in c.corrections]} for c in claims],
         "evidence": [{"id": e.id, "claim_id": e.claim_id, "stance": e.stance.value, "claim_supported": e.claim_supported, "relevance_score": e.relevance_score, "note": e.note, "citation": {"id": e.citation.id, "locator": e.citation.locator, "excerpt": e.citation.excerpt, "source": {"id": e.citation.source.id, "title": e.citation.source.title, "url": e.citation.source.url, "document_reference": e.citation.source.document_reference, "publisher": e.citation.source.publisher, "author": e.citation.source.author, "source_type": e.citation.source.source_type.value, "source_type_reviewed": e.citation.source.source_type_reviewed, "verification_status": e.citation.source.verification_status.value, "archive_url": e.citation.source.archive_url, "archived_at": e.citation.source.archived_at.isoformat() if e.citation.source.archived_at else None, "quality_score": e.citation.source.quality_score}}} for e in evidence],
         "rulings": [{"id": r.id, "outcome": r.outcome.value, "rationale": r.rationale, "rule_reference": r.rule_reference, "created_at": r.created_at.isoformat()} for r in rulings],
     }
@@ -53,6 +53,14 @@ def export_debate_markdown(debate_id: int, db: Session = Depends(get_db)):
         lines.append("No claims recorded.")
     for claim in data["claims"]:
         lines += [f"### Claim {claim['id']}", claim["body"], f"- Type: {claim['claim_type']}", f"- On topic: {'Yes' if claim['on_topic'] else 'No'}"]
+        if claim.get("uncertainty"):
+            lines.append(f"- Uncertainty: {claim['uncertainty']}")
+        for correction in claim.get("corrections") or []:
+            lines.append(
+                f"- Correction by user {correction['author_user_id']} at {correction['created_at']}: "
+                f"'{correction['original_body']}' corrected to '{correction['corrected_body']}'. "
+                f"Reason: {correction['reason']}"
+            )
         linked = [e for e in data["evidence"] if e["claim_id"] == claim["id"]]
         if linked:
             lines.append("- Evidence:")

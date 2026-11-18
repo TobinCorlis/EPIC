@@ -61,6 +61,7 @@ def add_claim(
         citation_required=payload.claim_type.value != "opinion",
         on_topic=result.on_topic,
         moderation_note=result.note,
+        uncertainty=(payload.uncertainty or "").strip() or None,
     )
     db.add(claim)
     db.commit()

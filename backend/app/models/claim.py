@@ -23,7 +23,10 @@ class Claim(Base):
     citation_required: Mapped[bool] = mapped_column(Boolean, default=True)
     on_topic: Mapped[bool] = mapped_column(Boolean, default=True)
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    corrections = relationship("ClaimCorrection", back_populates="claim", cascade="all, delete-orphan")
 
     debate = relationship("Debate", back_populates="claims")
     evidence_links = relationship("ClaimEvidence", back_populates="claim", cascade="all, delete-orphan")
