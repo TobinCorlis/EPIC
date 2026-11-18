@@ -52,7 +52,7 @@ pytest -q
 5. Link that citation to a claim as supporting, contradicting, or contextual, and record the precise claim the evidence supports.
 6. Request the claim's evidence summary.
 
-The scoring system is deliberately transparent and provisional. It provides an explainable baseline, not an automatic declaration that a source or claim is true.
+Evidence is listed item by item. A self-declared source type stays unverified, and is ranked as unknown, until a moderator or administrator reviews it. Reviewed items are ordered by evidence tier. Items from the same publisher, host, or document count as one independent source. EPIC does not add item scores together, and publisher or author text does not add points.
 
 ## Structured argument workflow
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import CheckConstraint, DateTime, Enum as SqlEnum, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SqlEnum, Float, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -48,6 +48,9 @@ class Source(Base):
     author: Mapped[str | None] = mapped_column(String(300), nullable=True)
     publication_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     source_type: Mapped[SourceType] = mapped_column(SqlEnum(SourceType), default=SourceType.unknown)
+    source_type_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_type_reviewed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    source_type_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     verification_status: Mapped[SourceVerificationStatus] = mapped_column(
         SqlEnum(SourceVerificationStatus), default=SourceVerificationStatus.unverified
     )
