@@ -22,6 +22,7 @@ class Claim(Base):
     claim_type: Mapped[ClaimType] = mapped_column(SqlEnum(ClaimType), default=ClaimType.factual)
     citation_required: Mapped[bool] = mapped_column(Boolean, default=True)
     on_topic: Mapped[bool] = mapped_column(Boolean, default=True)
+    needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

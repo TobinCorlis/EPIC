@@ -23,8 +23,12 @@ def test_preview_detects_citation_and_pivot():
     dh={'Authorization':f'Bearer {debater}'}
     result=client.post(f"/debates/{debate['id']}/turns/preview",headers=dh,json={'body':'What about a different scandal? The real issue is unrelated.'})
     assert result.status_code==200
-    assert result.json()['pivot_detected'] is True
-    assert result.json()['approved'] is False
+    body = result.json()
+    assert body['on_topic'] is True
+    assert body['needs_review'] is True
+    assert body['pivot_detected'] is False
+    assert body['approved'] is False
+    assert 'whataboutism' not in ' '.join(body['reasons']).lower()
     factual=client.post(f"/debates/{debate['id']}/turns/preview",headers=dh,json={'body':'The report shows a 35% increase in evidence use.'}).json()
     assert factual['citation_required'] is True
     assert factual['citation_present'] is False

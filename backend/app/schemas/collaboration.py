@@ -84,6 +84,7 @@ class TurnAnalysisRead(BaseModel):
     rebuttal_target_required: bool
     approved: bool
     reasons: list[str]
+    needs_review: bool = False
 
 
 class ModerationReviewRead(BaseModel):
