@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -5,8 +7,9 @@ from app.core.authorization import require_authenticated
 from app.core.database import get_db
 from app.models.argument import ArgumentNode, VerificationStatus
 from app.models.auth import User
+from app.models.evidence import Source, SourceVerificationStatus
 from app.models.knowledge import KnowledgeClaim, KnowledgeStatus
-from app.models.verification import VerificationEvent, VerificationSubject
+from app.models.verification import RecordedVerificationStatus, VerificationEvent, VerificationSubject
 from app.schemas.verification import VerificationEventCreate, VerificationEventRead
 
 router = APIRouter(prefix="/verification-events", tags=["verification"])
@@ -20,10 +23,20 @@ def _apply_status(db: Session, payload: VerificationEventCreate) -> None:
             raise HTTPException(status_code=404, detail="Argument node not found")
         subject.verification_status = VerificationStatus(recorded)
         return
-    subject = db.get(KnowledgeClaim, payload.subject_id)
-    if not subject:
-        raise HTTPException(status_code=404, detail="Knowledge claim not found")
-    subject.status = KnowledgeStatus(recorded)
+    if payload.subject_type == VerificationSubject.knowledge_claim:
+        subject = db.get(KnowledgeClaim, payload.subject_id)
+        if not subject:
+            raise HTTPException(status_code=404, detail="Knowledge claim not found")
+        subject.status = KnowledgeStatus(recorded)
+        return
+    source = db.get(Source, payload.subject_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    source.verification_status = SourceVerificationStatus(recorded)
+    if payload.archive_url:
+        source.archive_url = payload.archive_url
+    if payload.result_status == RecordedVerificationStatus.archived:
+        source.archived_at = datetime.utcnow()
 
 
 @router.post("", response_model=VerificationEventRead, status_code=status.HTTP_201_CREATED)

@@ -103,7 +103,12 @@ def test_evidence_challenge_can_be_resolved_by_moderator():
     ).json()
     link = client.post(
         f"/claims/{claim['id']}/evidence",
-        json={"citation_id": citation["id"], "stance": "supports", "relevance_score": 0.7},
+        json={
+            "citation_id": citation["id"],
+            "stance": "supports",
+            "relevance_score": 0.7,
+            "claim_supported": "The report states a measurable result.",
+        },
     ).json()
 
     challenge = client.post(

@@ -10,6 +10,7 @@ from app.core.database import Base
 class VerificationSubject(str, Enum):
     argument_node = "argument_node"
     knowledge_claim = "knowledge_claim"
+    source = "source"
 
 
 class RecordedVerificationStatus(str, Enum):

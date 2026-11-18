@@ -36,7 +36,7 @@ def export_debate_json(debate_id: int, db: Session = Depends(get_db)):
         "debate": {"id": debate.id, "title": debate.title, "fixed_question": debate.fixed_question, "description": debate.description, "status": debate.status.value if hasattr(debate.status, "value") else str(debate.status)},
         "participants": [{"id": p.id, "name": p.display_name, "role": p.role.value, "side": p.side.value} for p in participants],
         "claims": [{"id": c.id, "body": c.body, "claim_type": c.claim_type.value, "citation_required": c.citation_required, "on_topic": c.on_topic, "moderation_note": c.moderation_note} for c in claims],
-        "evidence": [{"id": e.id, "claim_id": e.claim_id, "stance": e.stance.value, "relevance_score": e.relevance_score, "note": e.note, "citation": {"id": e.citation.id, "locator": e.citation.locator, "excerpt": e.citation.excerpt, "source": {"id": e.citation.source.id, "title": e.citation.source.title, "url": e.citation.source.url, "publisher": e.citation.source.publisher, "author": e.citation.source.author, "source_type": e.citation.source.source_type.value, "quality_score": e.citation.source.quality_score}}} for e in evidence],
+        "evidence": [{"id": e.id, "claim_id": e.claim_id, "stance": e.stance.value, "claim_supported": e.claim_supported, "relevance_score": e.relevance_score, "note": e.note, "citation": {"id": e.citation.id, "locator": e.citation.locator, "excerpt": e.citation.excerpt, "source": {"id": e.citation.source.id, "title": e.citation.source.title, "url": e.citation.source.url, "document_reference": e.citation.source.document_reference, "publisher": e.citation.source.publisher, "author": e.citation.source.author, "source_type": e.citation.source.source_type.value, "verification_status": e.citation.source.verification_status.value, "archive_url": e.citation.source.archive_url, "archived_at": e.citation.source.archived_at.isoformat() if e.citation.source.archived_at else None, "quality_score": e.citation.source.quality_score}}} for e in evidence],
         "rulings": [{"id": r.id, "outcome": r.outcome.value, "rationale": r.rationale, "rule_reference": r.rule_reference, "created_at": r.created_at.isoformat()} for r in rulings],
     }
 
@@ -59,7 +59,13 @@ def export_debate_markdown(debate_id: int, db: Session = Depends(get_db)):
             for e in linked:
                 src = e["citation"]["source"]
                 locator = f" ({e['citation']['locator']})" if e["citation"]["locator"] else ""
-                lines.append(f"  - {e['stance']}: [{src['title']}]({src['url']}){locator}")
+                if src.get("url"):
+                    located = f"[{src['title']}]({src['url']})"
+                else:
+                    located = f"{src['title']} — {src.get('document_reference')}"
+                lines.append(
+                    f"  - {e['stance']}: {located}{locator}. Claim supported: {e['claim_supported']}"
+                )
         lines.append("")
     lines += ["## Moderator rulings", ""]
     if not data["rulings"]:

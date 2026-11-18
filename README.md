@@ -47,9 +47,9 @@ pytest -q
 
 1. Create a debate with a permanently fixed question.
 2. Add a claim to the debate.
-3. Register a source and receive its provisional quality score.
+3. Register a source by URL or by a document reference. New sources are unverified. Archive URL and archived time are set only by a verification event.
 4. Create a pinpoint citation containing a locator and optional excerpt.
-5. Link that citation to a claim as supporting, contradicting, or contextual.
+5. Link that citation to a claim as supporting, contradicting, or contextual, and record the precise claim the evidence supports.
 6. Request the claim's evidence summary.
 
 The scoring system is deliberately transparent and provisional. It provides an explainable baseline, not an automatic declaration that a source or claim is true.
