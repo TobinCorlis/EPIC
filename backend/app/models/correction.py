@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -27,6 +27,7 @@ class ClaimCorrection(Base):
     original_body: Mapped[str] = mapped_column(Text)
     corrected_body: Mapped[str] = mapped_column(Text)
     reason: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(40), default="text")
     author_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

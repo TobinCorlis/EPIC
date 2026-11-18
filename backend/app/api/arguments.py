@@ -10,6 +10,7 @@ from app.core.authorization import (
     get_optional_user,
 )
 from app.core.clock import utcnow
+from app.services.verification_history import overturn_verified_for_debate_claim
 from app.core.database import get_db
 from app.models.argument import (
     ArgumentNode,
@@ -206,6 +207,13 @@ def update_evidence_challenge(
         challenge.resolved_at = utcnow()
     else:
         challenge.resolved_at = None
+    if payload.status == ChallengeStatus.upheld:
+        overturn_verified_for_debate_claim(
+            db,
+            claim.id,
+            user,
+            payload.response or "Evidence challenge was upheld.",
+        )
     db.commit()
     db.refresh(challenge)
     return challenge
@@ -252,6 +260,14 @@ def create_moderator_ruling(
         elif payload.outcome == RulingOutcome.challenge_denied:
             challenge.status = ChallengeStatus.denied
             challenge.resolved_at = utcnow()
+        if payload.outcome == RulingOutcome.challenge_upheld:
+            link = db.get(ClaimEvidence, challenge.claim_evidence_id)
+            overturn_verified_for_debate_claim(
+                db,
+                link.claim_id,
+                user,
+                payload.rationale,
+            )
 
     if node is not None:
         # Rulings are procedural. They do not verify or archive a claim.

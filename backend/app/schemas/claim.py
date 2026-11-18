@@ -13,6 +13,7 @@ class CorrectionRead(BaseModel):
     original_body: str
     corrected_body: str
     reason: str
+    kind: str = "text"
     author_user_id: int
     created_at: datetime
 
