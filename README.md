@@ -237,7 +237,7 @@ From an activated environment with dependencies installed:
 python scripts/verify_release.py
 ```
 
-This creates a temporary clean database, applies every Alembic migration, and runs the complete automated test suite.
+This creates a temporary clean database, applies every Alembic migration, and runs the complete automated test suite. It then builds an unmodified v1.0-rc2 database, seeds it, upgrades that database to the current revision, and downgrades it again. Set `EPIC_UPGRADE_POSTGRES_URL` to a disposable PostgreSQL database to run the same upgrade check there. The URL's schema is dropped.
 
 ## Important deployment boundary
 

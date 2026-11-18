@@ -7,8 +7,24 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: epic
+          POSTGRES_PASSWORD: epic
+          POSTGRES_DB: epic_upgrade
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U epic -d epic_upgrade"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -19,4 +35,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
       - name: Verify migrations and tests
+        env:
+          EPIC_UPGRADE_POSTGRES_URL: postgresql+psycopg://epic:epic@localhost:5432/epic_upgrade
         run: python scripts/verify_release.py

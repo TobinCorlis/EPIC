@@ -2,7 +2,10 @@ import os
 from pathlib import Path
 
 TEST_DB = Path(__file__).parent / "test_suite_epic.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
+if os.environ.get("EPIC_PYTEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["EPIC_PYTEST_DATABASE_URL"]
+else:
+    os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DB}"
 
 import pytest
 
@@ -16,5 +19,5 @@ def database_schema():
     yield
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
-    if TEST_DB.exists():
+    if not os.environ.get("EPIC_PYTEST_DATABASE_URL") and TEST_DB.exists():
         TEST_DB.unlink()
