@@ -28,11 +28,13 @@ class ArgumentNodeType(str, Enum):
 
 
 class VerificationStatus(str, Enum):
+    unverified = "unverified"
     unreviewed = "unreviewed"
     pending = "pending"
     verified = "verified"
     disputed = "disputed"
     rejected = "rejected"
+    archived = "archived"
 
 
 class ChallengeStatus(str, Enum):
@@ -82,7 +84,7 @@ class ArgumentNode(Base):
     side: Mapped[DebateSide] = mapped_column(SqlEnum(DebateSide))
     body: Mapped[str] = mapped_column(Text)
     verification_status: Mapped[VerificationStatus] = mapped_column(
-        SqlEnum(VerificationStatus), default=VerificationStatus.unreviewed
+        SqlEnum(VerificationStatus), default=VerificationStatus.unverified
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -92,6 +94,12 @@ class ArgumentNode(Base):
     parent = relationship("ArgumentNode", remote_side=[id], back_populates="children")
     children = relationship("ArgumentNode", back_populates="parent")
     rulings = relationship("ModeratorRuling", back_populates="argument_node")
+    status_history = relationship(
+        "StatusHistory",
+        primaryjoin="and_(StatusHistory.subject_type=='argument_node', foreign(StatusHistory.subject_id)==ArgumentNode.id)",
+        viewonly=True,
+        order_by="StatusHistory.id",
+    )
 
 
 class EvidenceChallenge(Base):

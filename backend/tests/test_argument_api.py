@@ -45,7 +45,7 @@ def test_structured_argument_and_ruling_workflow():
     )
     assert premise.status_code == 201
     assert premise.json()["side"] == "affirmative"
-    assert premise.json()["verification_status"] == "pending"
+    assert premise.json()["verification_status"] == "unverified"
 
     conclusion = client.post(
         f"/debates/{debate['id']}/arguments",
@@ -72,7 +72,7 @@ def test_structured_argument_and_ruling_workflow():
 
     updated = client.get(f"/debates/{debate['id']}/arguments")
     assert updated.status_code == 200
-    assert updated.json()[0]["verification_status"] == "verified"
+    assert updated.json()[0]["verification_status"] == "unverified"
 
     audit = client.get(f"/debates/{debate['id']}/rulings")
     assert audit.status_code == 200

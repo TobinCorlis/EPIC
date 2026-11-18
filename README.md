@@ -59,7 +59,7 @@ The scoring system is deliberately transparent and provisional. It provides an e
 1. Add participants to a debate and assign roles and sides.
 2. Create premises, conclusions, rebuttals, or concessions.
 3. Link argument nodes to claims and to parent argument nodes.
-4. Track unreviewed, pending, verified, disputed, or rejected status.
+4. New argument nodes start unverified. `verified` and `archived` are not set by the client or by a ruling. They are recorded only through `POST /verification-events`, which stores who, when, method, and an archive URL or snapshot hash.
 5. Challenge a specific claim-evidence relationship with a stated reason and requested remedy.
 6. Allow a moderator or designated AI assistant to issue a reasoned ruling.
 7. Retrieve the debate's ruling history as an audit trail.

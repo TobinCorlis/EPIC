@@ -10,6 +10,7 @@ from app.models.argument import (
     RulingOutcome,
     VerificationStatus,
 )
+from app.schemas.status_history import StatusHistoryRead
 
 
 class ParticipantCreate(BaseModel):
@@ -50,6 +51,7 @@ class ArgumentNodeRead(BaseModel):
     side: DebateSide
     body: str
     verification_status: VerificationStatus
+    status_history: list[StatusHistoryRead] = []
     created_at: datetime
 
 

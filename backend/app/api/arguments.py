@@ -107,7 +107,7 @@ def create_argument_node(debate_id: int, payload: ArgumentNodeCreate, db: Sessio
     node = ArgumentNode(
         debate_id=debate_id,
         side=participant.side,
-        verification_status=VerificationStatus.pending if payload.claim_id else VerificationStatus.unreviewed,
+        verification_status=VerificationStatus.unverified,
         **payload.model_dump(),
     )
     db.add(node)
@@ -134,6 +134,11 @@ def update_verification(
         raise HTTPException(status_code=404, detail="Argument node not found")
     debate = require_debate(db, node.debate_id)
     require_debate_manager(debate, user)
+    if payload.verification_status in {VerificationStatus.verified, VerificationStatus.archived}:
+        raise HTTPException(
+            status_code=422,
+            detail="verified and archived can only be set by a recorded verification event",
+        )
     node.verification_status = payload.verification_status
     db.commit()
     db.refresh(node)
@@ -226,9 +231,8 @@ def create_moderator_ruling(
             challenge.resolved_at = datetime.utcnow()
 
     if node is not None:
-        if payload.outcome in {RulingOutcome.allowed, RulingOutcome.challenge_denied}:
-            node.verification_status = VerificationStatus.verified
-        elif payload.outcome in {RulingOutcome.excluded, RulingOutcome.challenge_upheld}:
+        # Rulings are procedural. They do not verify or archive a claim.
+        if payload.outcome in {RulingOutcome.excluded, RulingOutcome.challenge_upheld}:
             node.verification_status = VerificationStatus.rejected
         elif payload.outcome in {RulingOutcome.warning, RulingOutcome.revision_required}:
             node.verification_status = VerificationStatus.disputed
