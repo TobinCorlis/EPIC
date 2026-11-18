@@ -78,8 +78,10 @@ Key API routes:
 - `GET /knowledge/dossiers/{id}/contradictions` — inspect contradiction candidates
 - `PATCH /knowledge/contradictions/{id}` — review, confirm, or dismiss a candidate
 - `POST /knowledge/jobs` — create a visible research job
-- `PATCH /knowledge/jobs/{id}` — advance progress and append an audit event
-- `GET /knowledge/jobs/{id}/events` — retrieve the complete progress history
+- `PATCH /knowledge/jobs/{id}` — a moderator or administrator may cancel a job. The route rejects completion, progress, and result summaries.
+- `GET /knowledge/jobs/{id}/events` — retrieve the recorded status history
+
+Automated research is not implemented. The worker does not search sources or compare claims. It records `not_implemented` and does not mark the job completed.
 
 The matching service uses transparent normalized-token similarity and explicit-negation detection. It only flags candidates; it does not silently merge claims or declare a contradiction resolved.
 

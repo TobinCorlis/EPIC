@@ -28,10 +28,13 @@ def test_automatic_research_worker_advances_job():
     current = None
     while time.time() < deadline:
         current = client.get(f'/knowledge/jobs/{job_id}').json()
-        if current['status'] == 'completed':
+        if current['status'] == 'not_implemented':
             break
         time.sleep(.04)
-    assert current['progress_percent'] == 100
+    assert current['status'] == 'not_implemented'
+    assert current['progress_percent'] == 0
+    assert current['result_summary'] is None
+    assert 'not implemented' in current['error_message'].lower()
     events = client.get(f'/knowledge/jobs/{job_id}/events').json()
-    assert len(events) >= 6
-    assert events[-1]['step'] == 'Completed'
+    assert events[-1]['step'] == 'Automated research is not implemented'
+    assert all('Searching registered sources' not in event['step'] for event in events)

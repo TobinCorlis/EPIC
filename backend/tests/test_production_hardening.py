@@ -21,8 +21,10 @@ def test_database_backed_worker_claims_and_completes_job():
     process_job(job_id, delay=0)
 
     db = SessionLocal(); completed = db.get(ResearchJob, job_id)
-    assert completed.status == ResearchJobStatus.completed
-    assert completed.progress_percent == 100
+    assert completed.status == ResearchJobStatus.not_implemented
+    assert completed.progress_percent == 0
+    assert completed.result_summary is None
+    assert "not implemented" in completed.error_message
     assert completed.worker_id == "test-worker"
     assert completed.attempt_count == 1
     db.close()
