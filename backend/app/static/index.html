@@ -1,17 +1,120 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EPIC</title><link rel="stylesheet" href="/static/styles.css"></head><body>
-<header><div><b>EPIC</b><span>Evidence Platform Information Center</span></div><button id="logout" hidden>Log out</button></header>
-<main><section id="auth" class="card narrow"><h1>Evidence-first debate</h1><p>Create an account, open a debate, add claims and evidence, and export a complete record.</p><input id="name" placeholder="Display name"><input id="email" type="email" placeholder="Email"><input id="password" type="password" placeholder="Password (8+ characters)"><div class="row"><button onclick="register()">Create account</button><button class="secondary" onclick="login()">Sign in</button></div><p id="authMsg" class="notice"></p></section>
-<section id="app" hidden><div class="hero"><div><h1 id="welcome">EPIC workspace</h1><p>Fixed questions. Reviewable claims. Auditable evidence.</p></div><div id="counts" class="counts"></div></div>
-<div id="onboarding" class="card onboarding"><b>First-use path</b><span>1. Create a debate</span><span>2. Open its workspace</span><span>3. Add claims and evidence</span><span>4. Export the record</span></div>
-<div class="grid"><section class="card"><h2>Create debate</h2><input id="debateTitle" placeholder="Debate title"><textarea id="question" placeholder="Fixed debate question"></textarea><textarea id="description" placeholder="Description"></textarea><button onclick="createDebate()">Create debate</button><p id="createMsg" class="notice"></p></section>
-<section class="card"><h2>Start research</h2><input id="researchQuery" placeholder="Research question"><button onclick="startResearch()">Start background job</button><p class="muted">Automated research is not implemented. The job records that status instead of a completed result.</p></section></div>
-<section class="card"><h2>Debates</h2><div id="debates"></div></section>
-<section class="card"><h2>Reference library</h2><p class="muted">A matching entry is reused with its recorded evidence. Keyword and question text are both searched. A stale entry is not shown as the current answer. A different entered scope is a different question. Automated research of a new point is not implemented.</p><div class="row"><input id="libraryQuery" placeholder="Search a question"><button class="secondary" onclick="searchLibrary()">Search</button></div><div id="libraryResults"></div></section>
-<section id="workspace" class="card" hidden><div class="row spread"><div><h2 id="workspaceTitle">Debate workspace</h2><p id="workspaceQuestion"></p><p id="libraryBanner" class="notice" hidden></p></div><button class="secondary" onclick="closeWorkspace()">Close</button></div>
-<nav class="tabs"><button onclick="showPanel('claimsPanel')">Claims & evidence</button><button class="secondary" onclick="showPanel('roomPanel')">Live room</button><button class="secondary" onclick="showPanel('reviewPanel')">Moderator queue</button><button class="secondary" onclick="showPanel('exportPanel')">Export</button></nav>
-<div id="claimsPanel" class="panel"><div class="grid"><div><h3>Add claim</h3><textarea id="claimBody" placeholder="Enter one clear claim"></textarea><textarea id="claimUncertainty" placeholder="Uncertainty or gap (optional)"></textarea><select id="claimType"><option value="factual">Factual</option><option value="inferential">Inferential</option><option value="opinion">Opinion</option></select><button onclick="addClaim()">Add claim</button><p id="claimMsg" class="notice"></p></div><div><h3>Attach evidence</h3><select id="evidenceClaim"></select><input id="sourceTitle" placeholder="Source title"><input id="sourceUrl" type="url" placeholder="https://example.org/source"><input id="documentReference" placeholder="Document reference if there is no URL"><div class="row"><input id="sourcePublisher" placeholder="Publisher"><input id="sourceAuthor" placeholder="Author"></div><select id="sourceType"><option value="unknown">Unknown</option><option value="primary_law">Primary law</option><option value="government_record">Government record</option><option value="peer_reviewed">Peer reviewed</option><option value="official_data">Official data</option><option value="reputable_news">Reputable news</option><option value="expert_analysis">Expert analysis</option><option value="advocacy">Advocacy</option><option value="user_generated">User generated</option></select><input id="citationLocator" placeholder="Page, section, timestamp, or paragraph"><textarea id="citationExcerpt" placeholder="Relevant excerpt (optional)"></textarea><textarea id="claimSupported" placeholder="Precise claim this evidence supports (required)"></textarea><select id="evidenceStance"><option value="supports">Supports</option><option value="contradicts">Contradicts</option><option value="contextualizes">Contextualizes</option></select><button onclick="attachEvidence()">Register and attach evidence</button><p id="evidenceMsg" class="notice"></p></div></div><h3>Claim record</h3><div id="claims"></div></div>
-<div id="roomPanel" class="panel" hidden><div id="turnState" class="pill"></div><div id="turns" class="turns"></div><textarea id="turnBody" placeholder="Enter your current turn. Keep it focused on the fixed question."></textarea><div class="row"><button class="secondary" onclick="previewTurn()">Preview moderation</button><button onclick="submitTurn()">Submit turn</button><button class="secondary" onclick="refreshRoom()">Refresh</button></div><p id="roomMsg" class="notice"></p></div>
-<div id="reviewPanel" class="panel" hidden><h3>Pending turn reviews</h3><div id="reviews"></div></div>
-<div id="exportPanel" class="panel" hidden><h3>Download debate record</h3><p>Export the fixed question, claims, linked evidence, participants, and moderator rulings.</p><div class="row"><button onclick="downloadExport('json')">Download JSON</button><button class="secondary" onclick="downloadExport('md')">Download Markdown</button></div></div>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EPIC</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header><div><b>EPIC</b><span>Evidence Platform Information Center</span></div><button id="logout" hidden type="button">Log out</button></header>
+<main>
+<section id="auth" class="card narrow">
+<h1>Evidence-first debate</h1>
+<p>Create an account, open a debate, add claims and evidence, and export a complete record.</p>
+<input id="name" placeholder="Display name">
+<input id="email" type="email" placeholder="Email">
+<input id="password" type="password" placeholder="Password (8+ characters)">
+<div class="row"><button type="button" onclick="register()">Create account</button><button type="button" class="secondary" onclick="login()">Sign in</button></div>
+<p id="authMsg" class="notice"></p>
 </section>
-<section class="card"><h2>Research progress</h2><div id="jobs"></div></section></section></main><script src="/static/app.js"></script></body></html>
+<section id="app" hidden>
+<div id="home">
+<div class="hero"><div><h1 id="welcome">EPIC workspace</h1><p>Fixed questions. Reviewable claims. Auditable evidence.</p></div><div id="counts" class="counts"></div></div>
+<div id="onboarding" class="card onboarding"><b>First-use path</b><span>1. Create a debate</span><span>2. Open its workspace</span><span>3. Add claims and evidence</span><span>4. Export the record</span></div>
+<div class="grid">
+<section class="card"><h2>Create debate</h2><input id="debateTitle" placeholder="Debate title"><textarea id="question" placeholder="Fixed debate question"></textarea><textarea id="description" placeholder="Description"></textarea><details><summary>Question scope (optional)</summary><input id="questionPopulation" placeholder="Population"><input id="questionTimeframe" placeholder="Timeframe"><input id="questionGeography" placeholder="Geography"><input id="questionMetric" placeholder="Metric or definition"></details><button type="button" onclick="createDebate()">Create debate</button><p id="createMsg" class="notice"></p></section>
+<section class="card"><h2>Start research</h2><input id="researchQuery" placeholder="Research question"><button type="button" onclick="startResearch()">Start background job</button><p class="library-intro">Automated research is not implemented. The job records that status instead of a completed result.</p></section>
+</div>
+<section class="card"><h2>Debates</h2><div id="debates"></div></section>
+<section class="card" id="libraryCard">
+<h2>Reference library</h2>
+<p class="library-intro">A matching entry is reused with its recorded evidence. Keyword and question text are both searched. A stale entry is not shown as the current answer. A different entered scope is a different question. Automated research of a new point is not implemented.</p>
+<div class="row"><input id="libraryQuery" placeholder="Search a question"><button type="button" class="secondary" onclick="searchLibrary()">Search</button></div>
+<div id="libraryResults"></div>
+<div id="libraryDetail"></div>
+</section>
+<section class="card"><h2>Verified knowledge claims</h2><p class="library-intro">A verified claim can be sent back for re-evaluation. The request records who asked, when, and why.</p><div id="verifiedClaims"></div></section>
+<section class="card"><h2>Research progress</h2><div id="jobs"></div></section>
+</div>
+<section id="workspace" class="card" hidden>
+<div class="row spread"><div><h2 id="workspaceTitle">Debate workspace</h2><p id="workspaceQuestion"></p></div><button type="button" class="secondary" onclick="closeWorkspace()">Back to debates</button></div>
+<div id="libraryBanner" class="library-banner" hidden></div>
+<nav class="tabs" aria-label="Workspace">
+<button type="button" class="tab" id="tab-claimsPanel" aria-selected="true" onclick="showPanel('claimsPanel')">Claims &amp; evidence</button>
+<button type="button" class="tab" id="tab-roomPanel" aria-selected="false" onclick="showPanel('roomPanel')">Live room</button>
+<button type="button" class="tab" id="tab-reviewPanel" aria-selected="false" onclick="showPanel('reviewPanel')">Moderator queue</button>
+<button type="button" class="tab" id="tab-exportPanel" aria-selected="false" onclick="showPanel('exportPanel')">Export</button>
+</nav>
+<div id="claimsPanel" class="panel">
+<div id="libraryAnswer"></div>
+<div id="newPoints"></div>
+<div class="grid">
+<div>
+<h3>Add claim</h3>
+<textarea id="claimBody" placeholder="Enter one clear claim"></textarea>
+<textarea id="claimUncertainty" placeholder="Uncertainty or gap (optional)"></textarea>
+<select id="claimType"><option value="factual">Factual</option><option value="inferential">Inferential</option><option value="opinion">Opinion</option></select>
+<details><summary>Claim scope (optional)</summary><input id="claimPopulation" placeholder="Population"><input id="claimTimeframe" placeholder="Timeframe"><input id="claimGeography" placeholder="Geography"><input id="claimMetric" placeholder="Metric or definition"></details>
+<button type="button" onclick="addClaim()">Add claim</button>
+<p id="claimMsg" class="notice"></p>
+</div>
+<div>
+<h3>Attach evidence</h3>
+<select id="evidenceClaim"></select>
+<input id="sourceTitle" placeholder="Source title">
+<input id="sourceUrl" type="url" placeholder="https://example.org/source">
+<input id="documentReference" placeholder="Document reference if there is no URL">
+<div class="row"><input id="sourcePublisher" placeholder="Publisher"><input id="sourceAuthor" placeholder="Author"></div>
+<select id="sourceType"><option value="unknown">Unknown</option><option value="primary_law">Primary law</option><option value="government_record">Government record</option><option value="peer_reviewed">Peer reviewed</option><option value="official_data">Official data</option><option value="reputable_news">Reputable news</option><option value="expert_analysis">Expert analysis</option><option value="advocacy">Advocacy</option><option value="user_generated">User generated</option></select>
+<input id="citationLocator" placeholder="Page, section, timestamp, or paragraph">
+<textarea id="citationExcerpt" placeholder="Relevant excerpt (optional)"></textarea>
+<textarea id="claimSupported" placeholder="Precise claim this evidence supports (required)"></textarea>
+<select id="evidenceStance"><option value="supports">Supports</option><option value="contradicts">Contradicts</option><option value="contextualizes">Contextualizes</option></select>
+<details><summary>Evidence scope (optional)</summary><input id="scopePopulation" placeholder="Population"><input id="scopeTimeframe" placeholder="Timeframe"><input id="scopeGeography" placeholder="Geography"><input id="scopeMetric" placeholder="Metric or definition"><input id="scopeStudyType" placeholder="Study type"><input id="scopeSampleSize" type="number" min="0" placeholder="Sample size"></details>
+<button type="button" onclick="attachEvidence()">Register and attach evidence</button>
+<p id="evidenceMsg" class="notice"></p>
+</div>
+</div>
+<h3>Claim record</h3>
+<div id="claims"></div>
+</div>
+<div id="roomPanel" class="panel" hidden>
+<p class="library-intro">The debate owner, a moderator, or an administrator configures this room. Add at least one debater, then set the turn length. Only debaters are placed in the turn order.</p>
+<div id="turnState" class="pill"></div>
+<h3>Participants</h3>
+<div id="participants"></div>
+<div class="grid">
+<div>
+<h3>Add participant</h3>
+<input id="participantName" placeholder="Display name">
+<select id="participantRole"><option value="debater">Debater</option><option value="moderator">Moderator</option><option value="observer">Observer</option></select>
+<select id="participantSide"><option value="affirmative">Affirmative</option><option value="negative">Negative</option><option value="neutral">Neutral</option></select>
+<button type="button" onclick="addParticipant()">Add participant</button>
+</div>
+<div>
+<h3>Configure room</h3>
+<label for="turnSeconds">Turn length in seconds (30–7200)</label>
+<input id="turnSeconds" type="number" min="30" max="7200" value="300">
+<label for="firstDebater">First debater</label>
+<select id="firstDebater"><option value="">First debater in the list</option></select>
+<button type="button" onclick="configureRoom()">Configure room</button>
+</div>
+</div>
+<div id="turns" class="turns"></div>
+<textarea id="turnBody" placeholder="Enter your current turn. Keep it focused on the fixed question."></textarea>
+<div class="row"><button type="button" class="secondary" onclick="previewTurn()">Preview moderation</button><button type="button" onclick="submitTurn()">Submit turn</button><button type="button" class="secondary" onclick="refreshRoom()">Refresh</button></div>
+<p id="roomMsg" class="notice"></p>
+</div>
+<div id="reviewPanel" class="panel" hidden><h3>Pending turn reviews</h3><div id="reviews"></div></div>
+<div id="exportPanel" class="panel" hidden>
+<h3>Download debate record</h3>
+<p>Export the fixed question, claims, linked evidence, participants, and moderator rulings.</p>
+<div class="row"><button type="button" onclick="downloadExport('json')">Download JSON</button><button type="button" class="secondary" onclick="downloadExport('md')">Download Markdown</button></div>
+</div>
+</section>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

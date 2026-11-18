@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 
 from app.core.database import SessionLocal
+from app.core.email import normalize_email
 from app.core.security import hash_password
 from app.models.auth import User, UserRole
 
@@ -21,12 +22,13 @@ class AdminBootstrapError(Exception):
 
 def create_first_admin(email: str, display_name: str, password: str) -> User:
     """Create an administrator account. Refuses once any administrator exists."""
-    normalized = email.lower().strip()
     name = display_name.strip()
     if len(password) < 8:
         raise AdminBootstrapError("Password must be at least 8 characters.")
-    if not normalized or "@" not in normalized:
-        raise AdminBootstrapError("A valid email address is required.")
+    try:
+        normalized = normalize_email(email)
+    except ValueError as exc:
+        raise AdminBootstrapError(str(exc)) from exc
     if len(name) < 2:
         raise AdminBootstrapError("Display name must be at least 2 characters.")
 
