@@ -15,6 +15,12 @@ class SourceCreate(BaseModel):
     author: str | None = Field(default=None, max_length=300)
     publication_date: datetime | None = None
     source_type: SourceType = SourceType.unknown
+    scope_population: str | None = Field(default=None, max_length=300)
+    scope_timeframe: str | None = Field(default=None, max_length=300)
+    scope_geography: str | None = Field(default=None, max_length=300)
+    scope_metric: str | None = Field(default=None, max_length=300)
+    scope_study_type: str | None = Field(default=None, max_length=80)
+    scope_sample_size: int | None = None
 
     @model_validator(mode="after")
     def require_url_or_document(self):
@@ -37,6 +43,12 @@ class SourceRead(BaseModel):
     publication_date: datetime | None
     source_type: SourceType
     source_type_reviewed: bool
+    scope_population: str | None = None
+    scope_timeframe: str | None = None
+    scope_geography: str | None = None
+    scope_metric: str | None = None
+    scope_study_type: str | None = None
+    scope_sample_size: int | None = None
     source_type_reviewed_by_user_id: int | None
     source_type_reviewed_at: datetime | None
     verification_status: SourceVerificationStatus
@@ -69,6 +81,12 @@ class EvidenceLinkCreate(BaseModel):
     citation_id: int
     stance: EvidenceStance
     claim_supported: str = Field(min_length=1, max_length=4000)
+    scope_population: str | None = Field(default=None, max_length=300)
+    scope_timeframe: str | None = Field(default=None, max_length=300)
+    scope_geography: str | None = Field(default=None, max_length=300)
+    scope_metric: str | None = Field(default=None, max_length=300)
+    scope_study_type: str | None = Field(default=None, max_length=80)
+    scope_sample_size: int | None = None
     relevance_score: float = Field(default=0.5, ge=0.0, le=1.0)
     note: str | None = Field(default=None, max_length=2000)
 
@@ -111,6 +129,17 @@ class ConfidenceAssessmentRead(BaseModel):
     automated_source_check_detail: str
 
 
+class ScopeFlagRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    kind: str
+    dimension: str
+    source_text: str
+    claim_text: str
+    note: str
+
+
 class ClaimEvidenceSummary(BaseModel):
     claim_id: int
     items: list[EvidenceItemRead]
@@ -119,6 +148,10 @@ class ClaimEvidenceSummary(BaseModel):
     citation_count: int
     citation_requirement_met: bool
     confidence: ConfidenceAssessmentRead | None = None
+    scope_flags: list[ScopeFlagRead] = []
+    scope_check: str = (
+        "Rule-based comparison of user-entered scope fields. A flag means needs review, not rejection."
+    )
 
 
 class SourceTypeReview(BaseModel):

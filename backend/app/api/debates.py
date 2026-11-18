@@ -63,6 +63,10 @@ def add_claim(
         needs_review=result.needs_review,
         moderation_note=result.note,
         uncertainty=(payload.uncertainty or "").strip() or None,
+        scope_population=payload.scope_population,
+        scope_timeframe=payload.scope_timeframe,
+        scope_geography=payload.scope_geography,
+        scope_metric=payload.scope_metric,
     )
     db.add(claim)
     db.commit()

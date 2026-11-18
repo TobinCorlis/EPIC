@@ -22,6 +22,7 @@ from app.schemas.evidence import (
 )
 from app.services.claim_confidence import AUTOMATED_SOURCE_CHECK, AUTOMATED_SOURCE_CHECK_DETAIL, assess_claim, source_record
 from app.services.evidence_scoring import score_source, summarize_evidence
+from app.services.scope_review import review_claim_scope
 
 router = APIRouter(tags=["evidence"])
 
@@ -42,6 +43,12 @@ def create_source(payload: SourceCreate, db: Session = Depends(get_db), user: Us
         verification_status=SourceVerificationStatus.unverified,
         quality_score=quality_score,
         quality_rationale=rationale,
+        scope_population=payload.scope_population,
+        scope_timeframe=payload.scope_timeframe,
+        scope_geography=payload.scope_geography,
+        scope_metric=payload.scope_metric,
+        scope_study_type=payload.scope_study_type,
+        scope_sample_size=payload.scope_sample_size,
     )
     db.add(source)
     try:
@@ -83,6 +90,7 @@ def link_evidence(claim_id: int, payload: EvidenceLinkCreate, db: Session = Depe
 
     link = ClaimEvidence(claim_id=claim_id, **payload.model_dump())
     db.add(link)
+    review_claim_scope(db, db.get(Claim, claim_id))
     try:
         db.commit()
     except IntegrityError as exc:
@@ -106,6 +114,7 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
     )
     summary = summarize_evidence(links)
     confidence = assess_claim(db, claim_id)
+    flags = review_claim_scope(db, claim)
     db.commit()
     return ClaimEvidenceSummary(
         claim_id=claim_id,
@@ -115,6 +124,7 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
         citation_count=summary.citation_count,
         citation_requirement_met=(not claim.citation_required) or summary.citation_count > 0,
         confidence={"claim_id": claim_id, **confidence},
+        scope_flags=flags,
     )
 
 
