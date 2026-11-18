@@ -36,6 +36,9 @@ class SourceRead(BaseModel):
     author: str | None
     publication_date: datetime | None
     source_type: SourceType
+    source_type_reviewed: bool
+    source_type_reviewed_by_user_id: int | None
+    source_type_reviewed_at: datetime | None
     verification_status: SourceVerificationStatus
     archive_url: str | None
     archived_at: datetime | None
@@ -83,11 +86,25 @@ class EvidenceLinkRead(BaseModel):
     created_at: datetime
 
 
+class EvidenceItemRead(BaseModel):
+    claim_evidence_id: int
+    stance: EvidenceStance
+    declared_source_type: SourceType
+    source_type_reviewed: bool
+    effective_tier: str
+    tier_rank: int
+    independence_key: str
+    claim_supported: str
+
+
 class ClaimEvidenceSummary(BaseModel):
     claim_id: int
-    supports_score: float
-    contradicts_score: float
-    contextual_score: float
-    net_evidence_score: float
+    items: list[EvidenceItemRead]
+    strongest_effective_tier: str
+    independent_source_count: int
     citation_count: int
     citation_requirement_met: bool
+
+
+class SourceTypeReview(BaseModel):
+    note: str = Field(min_length=3, max_length=1000)
