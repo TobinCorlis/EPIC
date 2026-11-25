@@ -98,6 +98,23 @@ class FableMoveRead(BaseModel):
     created_at: datetime
 
 
+class FableSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    referee_mode: Literal["ai_auto", "ai_suggest", "moderator_only"]
+    canon_only: bool = True
+    personal_knowledge_only: bool = True
+
+
+class FableOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ruling: Literal["allowed", "disallowed", "unverified"]
+    reason: str = Field(min_length=3)
+    citation: str = Field(min_length=1)
+    override_reason: str = Field(min_length=3)
+
+
 class FableDebateOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

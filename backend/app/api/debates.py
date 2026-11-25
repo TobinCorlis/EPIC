@@ -14,6 +14,7 @@ from app.schemas.status_history import StatusHistoryRead
 from app.schemas.debate import DebateCreate, DebateRead
 from app.services.moderation import evaluate_topic_alignment
 from app.services.reference_library import annotate_debate, annotate_point, consider_debate, consider_text
+from app.services.referee import evidence_flags
 from app.api.library import enqueue_after
 
 router = APIRouter(prefix="/debates", tags=["debates"])
@@ -36,6 +37,14 @@ def create_debate(
     db.refresh(debate)
     annotate_debate(db, debate)
     return debate
+
+
+@router.get("/{debate_id}/evidence-checks")
+def debate_evidence_checks(debate_id: int, db: Session = Depends(get_db)):
+    """Flags that can be read from recorded links. This does not decide who is right."""
+    if not db.get(Debate, debate_id):
+        raise HTTPException(status_code=404, detail="Debate not found")
+    return {"debate_id": debate_id, "flags": evidence_flags(db, debate_id)}
 
 
 @router.get("/{debate_id}", response_model=DebateRead)

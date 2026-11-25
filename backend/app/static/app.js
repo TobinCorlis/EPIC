@@ -616,6 +616,27 @@ async function addFableMove(id) { try { await api(`/fable/matchups/${id}/moves`,
 async function ruleFableMove() { try { const move = await api(`/fable/moves/${$('fableMoveId').value}/ruling`, {method:'POST', body: JSON.stringify({ruling:$('fableRuling').value, reason:$('fableRulingReason').value, citation:$('fableRulingCitation').value})}); await openFable(move.matchup_id); } catch (error) { msg('fableDetailMsg', error.message); } }
 async function saveDebateOutcome(id) { try { const moveIds = $('fableOutcomeMoves').value.split(',').map(value => Number(value.trim())).filter(Boolean); await api(`/fable/matchups/${id}/debate-outcome`, {method:'POST', body: JSON.stringify({outcome:$('fableDebateOutcome').value, note:$('fableDebateNote').value, move_ids:moveIds})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
 async function runFableMatchup(id) { try { const result = await api(`/fable/matchups/${id}/automated-run`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function loadEvidenceChecks() {
+  if (!currentDebate) return;
+  try {
+    const result = await api(`/debates/${currentDebate.id}/evidence-checks`);
+    $('evidenceChecks').innerHTML = result.flags.length ? result.flags.map(flag => `<p><b>${esc(flag.kind)}:</b> ${esc(flag.detail)}</p>`).join('') : '<p class="muted">No recorded citation problem.</p>';
+  } catch (error) { $('evidenceChecks').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
+}
+async function loadRefereeQueue() {
+  try {
+    const rows = await api('/fable/referee/queue');
+    $('refereeQueue').innerHTML = rows.length ? rows.map(row => `<article class="claim"><b>${esc(row.ruling)}</b> on move #${row.move_id} · ${esc(row.ruled_by)} · ${esc(row.provider_name || 'moderator')} ${esc(row.provider_version || '')}<p>${esc(row.reason)}</p><p>Citation: ${esc(row.citation)}. Lore ${esc((row.lore_item_ids || []).join(', ') || 'none')}. Confidence ${row.confidence == null ? 'none' : row.confidence}.</p><button type="button" onclick="acceptRuling(${row.id})">Accept</button> <button type="button" onclick="overrideRuling(${row.id})">Override</button> <button type="button" class="secondary" onclick="recheckRuling(${row.id})">Re-check</button></article>`).join('') : '<p class="muted">No proposed rulings. Participants cannot ask the referee for help.</p>';
+  } catch (error) { $('refereeQueue').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
+}
+async function acceptRuling(id) { await api(`/fable/rulings/${id}/accept`, {method:'POST'}); await loadRefereeQueue(); }
+async function overrideRuling(id) {
+  const reason = window.prompt('Override reason (required)');
+  if (!reason) return;
+  await api(`/fable/rulings/${id}/override`, {method:'POST', body: JSON.stringify({ruling:'disallowed', reason:'Moderator override of the recorded move only.', citation:'moderator record', override_reason:reason})});
+  await loadRefereeQueue();
+}
+async function recheckRuling(id) { await api(`/fable/rulings/${id}/recheck`, {method:'POST'}); await loadRefereeQueue(); }
 async function runFableReferee(id) { try { const result = await api(`/fable/matchups/${id}/automated-referee`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
 
 document.body.addEventListener('click', event => {

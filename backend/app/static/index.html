@@ -42,7 +42,10 @@
 <section id="fablePanel" class="card" hidden>
 <h2>EPIC FABLE</h2>
 <p class="library-intro">Fictional Analysis Based on Lore Evidence. This is fiction. Lore is not evidence and is never part of the factual reference library.</p>
-<p class="library-intro">An AI matchup run is not implemented. In a debate, humans argue from their own knowledge and must supply each power or feat and its canon citation. The referee rules only those moves. It does not coach, suggest powers, answer questions, or introduce a counter a debater did not raise. Automated AI refereeing is not implemented. A moderator can rule by hand. EPIC cannot fully prevent a debater from consulting material outside this room. Debate outcomes and AI matchup outcomes are stored separately.</p>
+<p class="library-intro">An AI matchup run is not implemented. In a debate, humans supply each feat and its canon citation. The referee checks only those submitted moves against recorded lore. It does not coach, suggest powers, answer questions, or introduce a counter. Personal knowledge only means participants get no AI help; the referee may still rule. A moderator can accept, override, or re-check. EPIC cannot fully prevent outside cheating. Debate outcomes and AI matchup outcomes stay separate.</p>
+<h3>Referee queue</h3>
+<div id="refereeQueue"></div>
+<button type="button" class="secondary" onclick="loadRefereeQueue()">Refresh referee queue</button>
 <label for="fableMode">Mode</label><select id="fableMode"><option value="ai_matchup">AI matchup</option><option value="debate">Debate (personal knowledge)</option></select>
 <input id="fableTitle" placeholder="Matchup title"><textarea id="fableQuestion" placeholder="Fictional question"></textarea><input id="fableCharacters" placeholder="Characters, separated by commas">
 <button type="button" onclick="createFable()">Create matchup</button><p id="fableMsg" class="notice"></p>
@@ -59,6 +62,9 @@
 <button type="button" class="tab" id="tab-exportPanel" aria-selected="false" onclick="showPanel('exportPanel')">Export</button>
 </nav>
 <div id="claimsPanel" class="panel">
+<p class="library-intro">Evidence checks compare recorded links only. They do not decide who is right.</p>
+<button type="button" class="secondary" onclick="loadEvidenceChecks()">Check recorded citations</button>
+<div id="evidenceChecks"></div>
 <div id="libraryAnswer"></div>
 <div id="newPoints"></div>
 <div class="grid">

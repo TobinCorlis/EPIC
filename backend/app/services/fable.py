@@ -57,7 +57,9 @@ def create_matchup(db: Session, user_id: int | None, payload) -> FableMatchup:
         mode=payload.mode,
         personal_knowledge_only=True if payload.mode == "debate" else bool(payload.personal_knowledge_only),
         automated_analysis=AUTOMATED_FABLE,
-        automated_referee=AUTOMATED_FABLE,
+        automated_referee="deterministic-lore",
+        referee_mode="ai_suggest",
+        canon_only=True,
         created_by_user_id=user_id,
     )
     db.add(matchup)
