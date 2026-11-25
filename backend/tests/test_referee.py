@@ -132,6 +132,66 @@ def test_override_keeps_the_ai_ruling_and_llm_cannot_invent_lore():
     assert direct.lore_item_ids == []
 
 
+def test_matchup_detail_includes_ruling_history_and_seed_is_idempotent():
+    headers = _moderator("detail@example.com")
+    created = client.post("/fable/matchups", json={
+        "title": "Detail history",
+        "question": "DEMO fiction.",
+        "mode": "debate",
+        "participants": ["Lantern", "Comet"],
+    }).json()
+    client.patch(f"/fable/matchups/{created['id']}/settings", headers=headers, json={
+        "referee_mode": "ai_auto", "canon_only": True, "personal_knowledge_only": True,
+    })
+    client.post(f"/fable/matchups/{created['id']}/lore", json={
+        "work_title": "Lantern Tales", "installment": "issue 1", "pinpoint": "page 4",
+        "canon_status": "primary_canon", "body": "Lantern throws one glass marble.",
+    })
+    client.post(f"/fable/matchups/{created['id']}/moves", json={
+        "participant_id": created["participants"][0]["id"],
+        "move_text": "Lantern throws one glass marble.",
+        "claimed_source": "Lantern Tales, issue 1, page 4",
+    })
+    detail = client.get(f"/fable/matchups/{created['id']}").json()
+    history = detail["moves"][0]["rulings"]
+    assert history
+    assert history[0]["reason"]
+    assert "Lantern Tales" in history[0]["citation"]
+    assert "issue 1" in history[0]["citation"]
+    assert "page 4" in history[0]["citation"]
+    assert history[0]["lore_item_ids"]
+    assert history[0]["ruled_by"] == "ai"
+    assert history[0]["provider_name"] == "deterministic-lore"
+    assert history[0]["confidence"] is not None
+    assert detail["referee_mode"] == "ai_auto"
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[2] / "scripts" / "seed_fable_demo.py"
+    spec = importlib.util.spec_from_file_location("seed_fable_demo", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    first = module.seed()
+    second = module.seed()
+    assert first == second
+    from app.models.fable import FableMatchup, FableRuling, FableMove
+    with SessionLocal() as db:
+        titles = [row[0] for row in db.query(FableMatchup.title).filter(FableMatchup.title.like("DEMO:%")).all()]
+        assert titles.count("DEMO: Lantern vs Comet") == 1
+        assert titles.count("DEMO: Lantern vs Comet (suggest)") == 1
+        suggest = db.query(FableMatchup).filter(FableMatchup.title == "DEMO: Lantern vs Comet (suggest)").one()
+        proposed = (
+            db.query(FableRuling)
+            .join(FableMove, FableMove.id == FableRuling.move_id)
+            .filter(FableMove.matchup_id == suggest.id, FableRuling.status == "proposed")
+            .count()
+        )
+        assert proposed >= 1
+    page = Path(__file__).resolve().parents[1].joinpath("app/static/app.js").read_text()
+    assert "Run AI referee on submitted moves" in page
+    assert "Automated AI refereeing is not implemented" not in page
+    assert "Save room settings" in page
+
+
 def test_evidence_checks_use_only_recorded_links():
     headers = _moderator("checks@example.com")
     debate = client.post("/debates", json={"title": "Check debate", "fixed_question": "Is the cited record findable?"}).json()

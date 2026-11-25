@@ -28,6 +28,7 @@ from app.schemas.fable import (
     FableMoveCreate,
     FableMoveRead,
     FableParticipantRead,
+    FableRulingRead,
     FableRulingCreate,
     FableStepCreate,
     FableStepRead,
@@ -87,11 +88,13 @@ def _read(db: Session, matchup: FableMatchup) -> FableMatchupRead:
         question=matchup.question,
         mode=matchup.mode,
         personal_knowledge_only=matchup.personal_knowledge_only,
+        referee_mode=matchup.referee_mode,
+        canon_only=matchup.canon_only,
         participants=[FableParticipantRead(id=row.id, name=row.name) for row in participants],
         lore=[FableLoreRead.model_validate(row) for row in lore],
         steps=step_reads,
         canon_notes=[FableCanonNoteRead.model_validate(row) for row in notes],
-        moves=[FableMoveRead.model_validate(row) for row in moves],
+        moves=[_move_read(db, row) for row in moves],
         ai_outcome=matchup.ai_outcome,
         ai_outcome_note=matchup.ai_outcome_note,
         debate_outcome=matchup.debate_outcome,
@@ -287,6 +290,28 @@ def patch_settings(matchup_id: int, payload: FableSettings, db: Session = Depend
     matchup.personal_knowledge_only = payload.personal_knowledge_only
     db.commit()
     return _read(db, matchup)
+
+
+def _move_read(db: Session, move: FableMove) -> FableMoveRead:
+    history = db.query(FableRuling).filter(FableRuling.move_id == move.id).order_by(FableRuling.id).all()
+    payload = FableMoveRead.model_validate(move)
+    payload.rulings = [
+        FableRulingRead(
+            id=row.id,
+            ruling=row.ruling,
+            reason=row.reason,
+            citation=row.citation,
+            lore_item_ids=json.loads(row.lore_item_ids or "[]"),
+            confidence=row.confidence,
+            ruled_by=row.ruled_by,
+            provider_name=row.provider_name,
+            provider_version=row.provider_version,
+            status=row.status,
+            override_reason=row.override_reason,
+        )
+        for row in history
+    ]
+    return payload
 
 
 def _ruling_dict(row: FableRuling) -> dict:

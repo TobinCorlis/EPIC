@@ -82,6 +82,20 @@ class FableRulingCreate(BaseModel):
     citation: str = Field(min_length=1)
 
 
+class FableRulingRead(BaseModel):
+    id: int
+    ruling: str
+    reason: str
+    citation: str
+    lore_item_ids: list[int]
+    confidence: float | None
+    ruled_by: str
+    provider_name: str | None = None
+    provider_version: str | None = None
+    status: str
+    override_reason: str | None = None
+
+
 class FableMoveRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -95,6 +109,7 @@ class FableMoveRead(BaseModel):
     reason: str | None
     citation: str | None
     ruled_by: str | None
+    rulings: list[FableRulingRead] = []
     created_at: datetime
 
 
@@ -130,6 +145,8 @@ class FableMatchupRead(BaseModel):
     mode: str
     fiction: bool = True
     personal_knowledge_only: bool
+    referee_mode: str = "ai_suggest"
+    canon_only: bool = True
     participants: list[FableParticipantRead]
     lore: list[FableLoreRead]
     steps: list[FableStepRead]
