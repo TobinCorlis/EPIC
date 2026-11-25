@@ -80,7 +80,7 @@ def test_no_supporting_evidence_is_unsupported_at_zero():
     assert confidence["label"] == "Unsupported"
     assert confidence["scale"] == "0–1"
     assert confidence["label"] != "Unknown – not yet rated"
-    assert confidence["automated_source_check"] == "not_implemented"
+    assert confidence["automated_source_check"] == "not_checked"
 
 
 def test_missing_citation_is_recorded_as_no_record_found():
@@ -173,7 +173,7 @@ def test_fabricated_lake_laser_is_refuted_by_geodetic_evidence():
     assert confidence["confidence_score"] == 0
     assert confidence["cited_source_note"] == "cited source: no record found"
     assert any(source["title"] == "National geodetic survey" for source in confidence["contradicting_sources"])
-    assert "not_implemented" in confidence["automated_source_check"]
+    assert confidence["automated_source_check"] == "not_checked"
 
 
 def test_weaker_contradiction_does_not_refute_stronger_reviewed_support():

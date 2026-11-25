@@ -285,6 +285,20 @@ def test_upstream_retraction_overturns_and_cascades_to_two_entries():
         )
         assert verified.status_code == 201, verified.text
         knowledge_ids.append(stored.json()["id"])
+    from app.models.factcheck import SourceCheck
+
+    with SessionLocal() as db:
+        db.add(SourceCheck(
+            source_id=source["id"],
+            checker_name="crossref",
+            checker_version="factcheck-v1",
+            api_name="api.crossref.org",
+            query="works/10.1000/example",
+            response_id="10.1000/example",
+            result="found",
+            detail="Crossref has this DOI.",
+        ))
+        db.commit()
     source_event = client.post(
         "/verification-events",
         headers=headers,

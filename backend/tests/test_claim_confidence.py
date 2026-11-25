@@ -65,11 +65,11 @@ def test_confidence_uses_tier_not_volume_and_does_not_verify():
     government_summary = client.get(f"/claims/{government_claim['id']}/evidence-summary").json()
     blog_summary = client.get(f"/claims/{blogs_claim['id']}/evidence-summary").json()
     assert government_summary["confidence"]["confidence_score"] > blog_summary["confidence"]["confidence_score"]
-    assert government_summary["confidence"]["automated_source_check"] == "not_implemented"
+    assert government_summary["confidence"]["automated_source_check"] == "not_checked"
     factors = {item["name"]: item["value"] for item in government_summary["confidence"]["factors"]}
     assert factors["track_record"] is None
     assert "unknown" in next(item["detail"] for item in government_summary["confidence"]["factors"] if item["name"] == "track_record")
     assert client.get(f"/debates/{blogs_debate['id']}/claims").json()[0]["on_topic"] is True
     record = client.get(f"/sources/{government['id']}/record").json()
-    assert record["automated_source_check"] == "not_implemented"
+    assert record["automated_source_check"] == "not_checked"
     assert record["found_false"] == 0

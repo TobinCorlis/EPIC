@@ -21,7 +21,9 @@ from app.schemas.evidence import (
     SourceRecordReview,
     SourceTypeReview,
 )
-from app.services.claim_confidence import AUTOMATED_SOURCE_CHECK, AUTOMATED_SOURCE_CHECK_DETAIL, assess_claim, source_record
+from app.services.claim_confidence import assess_claim, source_record
+from app.services.factcheck.runner import enqueue_verification, kickoff
+from app.services.factcheck.status import describe_source
 from app.services.evidence_scoring import score_source, summarize_evidence
 from app.services.scope_review import review_claim_scope
 
@@ -53,11 +55,14 @@ def create_source(payload: SourceCreate, db: Session = Depends(get_db), user: Us
     )
     db.add(source)
     try:
+        db.flush()
+        job = enqueue_verification(db, "source", source.id, user.id if user else None)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="A source with this URL already exists") from exc
     db.refresh(source)
+    kickoff(job.id)
     return source
 
 
@@ -76,8 +81,11 @@ def create_citation(payload: CitationCreate, db: Session = Depends(get_db), user
         raise HTTPException(status_code=404, detail="Source not found")
     citation = Citation(**payload.model_dump())
     db.add(citation)
+    db.flush()
+    job = enqueue_verification(db, "source", citation.source_id, user.id if user else None)
     db.commit()
     db.refresh(citation)
+    kickoff(job.id)
     return citation
 
 
@@ -93,11 +101,14 @@ def link_evidence(claim_id: int, payload: EvidenceLinkCreate, db: Session = Depe
     db.add(link)
     review_claim_scope(db, db.get(Claim, claim_id))
     try:
+        db.flush()
+        job = enqueue_verification(db, "claim", claim_id, user.id if user else None)
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail="This citation is already linked to the claim") from exc
     db.refresh(link)
+    kickoff(job.id)
     return link
 
 
@@ -150,6 +161,7 @@ def get_source_record(source_id: int, db: Session = Depends(get_db)):
     if not db.get(Source, source_id):
         raise HTTPException(status_code=404, detail="Source not found")
     record = source_record(db, source_id)
+    status_name, detail = describe_source(db, source_id)
     return {
         "source_id": source_id,
         "corrected": record.corrected,
@@ -157,8 +169,8 @@ def get_source_record(source_id: int, db: Session = Depends(get_db)):
         "found_false": record.found_false,
         "confirmed": record.confirmed,
         "track_factor": record.track_factor,
-        "automated_source_check": AUTOMATED_SOURCE_CHECK,
-        "automated_source_check_detail": AUTOMATED_SOURCE_CHECK_DETAIL,
+        "automated_source_check": status_name,
+        "automated_source_check_detail": detail,
     }
 
 
@@ -171,7 +183,7 @@ def review_source_record(
 ):
     """Record a human check that a cited source was found, or that no record exists.
 
-    Automated lookup is not implemented. This does not fetch the source.
+    This does not fetch the source and does not mark it verified.
     """
     source = db.get(Source, source_id)
     if not source:

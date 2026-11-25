@@ -38,6 +38,7 @@
 </section>
 <section class="card"><h2>Verified knowledge claims</h2><p class="library-intro">A verified claim can be sent back for re-evaluation. The request records who asked, when, and why.</p><div id="verifiedClaims"></div></section>
 <section class="card"><h2>Research progress</h2><div id="jobs"></div></section>
+<section class="card" id="factcheckCard"><h2>Verification queue</h2><p class="library-intro">Flagged checks and candidate counterevidence. A candidate is not linked evidence and does not change a score. A failed check is not a verification.</p><div id="factcheckQueue"></div><button type="button" class="secondary" onclick="loadFactcheckQueue()">Refresh verification queue</button></section>
 </div>
 <section id="fablePanel" class="card" hidden>
 <h2>EPIC FABLE</h2>
@@ -124,7 +125,7 @@
 <div class="row"><button type="button" class="secondary" onclick="previewTurn()">Preview moderation</button><button type="button" onclick="submitTurn()">Submit turn</button><button type="button" class="secondary" onclick="refreshRoom()">Refresh</button></div>
 <p id="roomMsg" class="notice"></p>
 </div>
-<div id="reviewPanel" class="panel" hidden><h3>Pending turn reviews</h3><div id="reviews"></div></div>
+<div id="reviewPanel" class="panel" hidden><h3>Pending turn reviews</h3><div id="reviews"></div><h3>Flagged source checks</h3><div id="factcheckQueueReview"></div><button type="button" class="secondary" onclick="loadFactcheckQueue()">Refresh verification queue</button></div>
 <div id="exportPanel" class="panel" hidden>
 <h3>Download debate record</h3>
 <p>Export the fixed question, claims, linked evidence, participants, and moderator rulings.</p>
@@ -133,6 +134,6 @@
 </section>
 </section>
 </main>
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>

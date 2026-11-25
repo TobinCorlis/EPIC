@@ -81,7 +81,7 @@ function confidenceBlock(confidence) {
     `<li><b>${esc(factor.name)}</b>: ${esc(formatFactor(factor.value))}. ${esc(factor.detail || '')}</li>`
   ).join('');
   const automated = confidence.automated_source_check
-    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'Automated lookup of cited sources is not implemented.')}</p>`
+    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'No automated source check has been recorded.')}</p>`
     : '';
   const missing = confidence.cited_source_note ? `<p>${esc(confidence.cited_source_note)}</p>` : '';
   const contradictions = (confidence.contradicting_sources || []).length
@@ -236,6 +236,7 @@ async function refresh() {
       ? dashboard.jobs.map(job => `<div class="item"><b>${esc(job.query)}</b><div class="muted">${esc(job.current_step)} · ${esc(job.status === 'not_implemented' ? 'not implemented' : job.status)}</div><div class="bar"><i style="width:${job.progress_percent}%"></i></div></div>`).join('')
       : '<p class="muted">No research jobs yet.</p>';
     refreshVerifiedClaims();
+    loadFactcheckQueue();
   } catch {
     localStorage.removeItem('epic_token');
     token = null;
@@ -321,7 +322,7 @@ function showPanel(id) {
     const selected = tab.id === 'tab-' + id;
     tab.setAttribute('aria-selected', selected ? 'true' : 'false');
   }
-  if (id === 'reviewPanel') refreshReviews();
+  if (id === 'reviewPanel') { refreshReviews(); loadFactcheckQueue(); }
   if (id === 'roomPanel') refreshRoom();
 }
 
@@ -413,11 +414,13 @@ async function refreshClaims() {
     const cards = await Promise.all(claims.map(async claim => {
       let summary = null;
       try { summary = await api(`/claims/${claim.id}/evidence-summary`); } catch { summary = null; }
+      let checks = [];
+      try { checks = await api(`/claims/${claim.id}/checks`); } catch { checks = []; }
       const links = (summary?.items || []).map(item => {
         const flags = (summary.scope_flags || []).filter(flag => flag.claim_evidence_id === item.claim_evidence_id);
         return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · tier ${esc(item.effective_tier)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
       }).join('');
-      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
+      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
     }));
     const present = new Set(claims.map(claim => claim.id));
     const extras = libraryClaims.filter(claim => !present.has(claim.id)).map(claim => `<article class="claim read-only"><b>Library claim #${claim.id}</b><p>${esc(claim.body)}</p><p>Read-only. Linked from library entry #${currentLibraryEntry.id}${currentLibraryEntry.stale ? '. Not the current answer.' : ''}.</p><p><a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p></article>`).join('');
@@ -573,6 +576,51 @@ function showProduct(which) {
   $('tabFactual').setAttribute('aria-selected', factual ? 'true' : 'false');
   $('tabFable').setAttribute('aria-selected', factual ? 'false' : 'true');
   if (!factual) { loadFables(); loadRefereeQueue(); }
+  else loadFactcheckQueue();
+}
+
+function verificationPanel(checks, claimId) {
+  const rows = checks || [];
+  const items = rows.length
+    ? rows.map(check => {
+      const links = [];
+      if (check.evidence_url) links.push(`<a href="${esc(check.evidence_url)}">Record</a>`);
+      if (check.archive_url) links.push(`<a href="${esc(check.archive_url)}">Archive snapshot</a>`);
+      return `<li><b>${esc(check.checker_name)}</b> · ${esc(check.result)} · ${esc(formatWhen(check.created_at))}<div>${esc(check.detail || '')}</div>${check.matched_snippet ? `<div>Snippet: ${esc(check.matched_snippet)}</div>` : ''}<div>${links.join(' · ') || 'No external link recorded.'}</div></li>`;
+    }).join('')
+    : '<li>No automated check has been recorded.</li>';
+  const button = claimId ? `<button type="button" data-rerun-claim="${claimId}">Re-run checks</button>` : '';
+  return `<div class="verification"><p><b>Verification</b></p><ul>${items}</ul>${button}</div>`;
+}
+
+async function loadFactcheckQueue() {
+  const target = $('factcheckQueue');
+  const review = $('factcheckQueueReview');
+  if (!target && !review) return;
+  try {
+    const rows = await api('/factcheck/queue');
+    const html = rows.length
+      ? rows.map(check => `<article class="item"><b>${esc(check.result)}</b> · ${esc(check.checker_name)} · source ${esc(check.source_id ?? 'none')} · claim ${esc(check.claim_id ?? 'none')}<div>${esc(check.detail || '')}</div><div>${esc(formatWhen(check.created_at))}</div>${check.evidence_url ? `<div><a href="${esc(check.evidence_url)}">Record</a></div>` : ''}${check.archive_url ? `<div><a href="${esc(check.archive_url)}">Archive snapshot</a></div>` : ''}${check.source_id ? `<button type="button" data-rerun-source="${check.source_id}">Re-run checks</button>` : ''}</article>`).join('')
+      : '<p class="muted">No flagged checks.</p>';
+    if (target) target.innerHTML = html;
+    if (review) review.innerHTML = html;
+  } catch (error) {
+    const html = `<p class="error">${esc(error.message)}</p>`;
+    if (target) target.innerHTML = html;
+    if (review) review.innerHTML = html;
+  }
+}
+
+async function rerunSourceChecks(sourceId) {
+  await api(`/sources/${sourceId}/checks`, {method: 'POST', body: '{}'});
+  await loadFactcheckQueue();
+  if (currentDebate) await refreshClaims();
+}
+
+async function rerunClaimChecks(claimId) {
+  await api(`/claims/${claimId}/checks`, {method: 'POST', body: '{}'});
+  if (currentDebate) await refreshClaims();
+  await loadFactcheckQueue();
 }
 
 async function createFable() {
@@ -659,6 +707,10 @@ async function runFableReferee(id) { try { const result = await api(`/fable/matc
 document.body.addEventListener('click', event => {
   const fableButton = event.target.closest('[data-open-fable]');
   if (fableButton) openFable(Number(fableButton.dataset.openFable));
+  const rerunSource = event.target.closest('[data-rerun-source]');
+  if (rerunSource) rerunSourceChecks(Number(rerunSource.dataset.rerunSource));
+  const rerunClaim = event.target.closest('[data-rerun-claim]');
+  if (rerunClaim) rerunClaimChecks(Number(rerunClaim.dataset.rerunClaim));
   const debateButton = event.target.closest('[data-open-debate]');
   if (debateButton) openWorkspace({id: Number(debateButton.dataset.openDebate)});
   const entryButton = event.target.closest('[data-open-entry]');

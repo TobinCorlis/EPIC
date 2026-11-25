@@ -79,6 +79,34 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
         if _NATIONAL.search(claim.body) and _LOCAL.search(geography):
             add("overgeneralization", "geography", geography, claim.body, link.id)
 
+    from app.models.factcheck import SourceCheck
+
+    suggestions = (
+        db.query(SourceCheck)
+        .filter(SourceCheck.claim_id == claim.id, SourceCheck.checker_name == "related_work")
+        .all()
+    )
+    seen_suggestions = set()
+    for check in suggestions:
+        if not (check.detail or "").startswith("Systematic review"):
+            continue
+        key = check.evidence_url or check.response_id or str(check.id)
+        if key in seen_suggestions:
+            continue
+        seen_suggestions.add(key)
+        flags.append(ScopeReviewFlag(
+            claim_id=claim.id,
+            claim_evidence_id=None,
+            kind="consensus_suggestion",
+            dimension="literature",
+            source_text=check.evidence_url or check.response_id or "",
+            claim_text=claim.body,
+            note=(
+                "Suggestion only. An automated search returned a systematic review or meta-analysis. "
+                "It is not linked evidence and does not change the score."
+            ),
+        ))
+
     supporting = [link for link in links if link.stance == EvidenceStance.supports]
     contradicting = [link for link in links if link.stance == EvidenceStance.contradicts]
     if len(supporting) == 1 and contradicting:
