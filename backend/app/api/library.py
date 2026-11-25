@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -5,7 +7,9 @@ from app.core.authorization import require_authenticated, require_role
 from app.core.database import get_db
 from app.models.auth import User, UserRole
 from app.models.claim import Claim
+from app.models.evidence import Source
 from app.models.knowledge import KnowledgeClaim
+from app.models.verification import VerificationEvent
 from app.models.library import (
     LibraryPoint,
     ReferenceEntry,
@@ -17,8 +21,11 @@ from app.models.library import (
 )
 from app.schemas.library import (
     InvalidationCreate,
+    LibraryClaimBrief,
     LibraryEntryCreate,
     LibraryEntryRead,
+    LibrarySourceBrief,
+    LibraryVerificationBrief,
     LibraryVersionRead,
     PointResolve,
     ReevaluationCreate,
@@ -47,6 +54,20 @@ def _guard(action):
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+def _version_read(version: ReferenceEntryVersion) -> LibraryVersionRead:
+    parsed = None
+    if version.confidence_json:
+        try:
+            loaded = json.loads(version.confidence_json)
+        except json.JSONDecodeError:
+            loaded = None
+        if isinstance(loaded, list):
+            parsed = loaded
+    row = LibraryVersionRead.model_validate(version)
+    row.confidence = parsed
+    return row
+
+
 def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
     versions = (
         db.query(ReferenceEntryVersion)
@@ -55,6 +76,23 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
         .all()
     )
     current = None if entry.stale else latest_version(db, entry.id)
+    claim_ids = [
+        row[0]
+        for row in db.query(ReferenceEntryClaim.claim_id).filter(ReferenceEntryClaim.entry_id == entry.id).all()
+    ]
+    source_ids = [
+        row[0]
+        for row in db.query(ReferenceEntrySource.source_id).filter(ReferenceEntrySource.entry_id == entry.id).all()
+    ]
+    event_ids = [
+        row[0]
+        for row in db.query(ReferenceEntryVerification.verification_event_id)
+        .filter(ReferenceEntryVerification.entry_id == entry.id)
+        .all()
+    ]
+    claims = db.query(Claim).filter(Claim.id.in_(claim_ids)).all() if claim_ids else []
+    sources = db.query(Source).filter(Source.id.in_(source_ids)).all() if source_ids else []
+    events = db.query(VerificationEvent).filter(VerificationEvent.id.in_(event_ids)).all() if event_ids else []
     label = None
     if entry.reevaluation_pending:
         label = "re-evaluation pending"
@@ -76,21 +114,30 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
         stale=entry.stale,
         reevaluation_pending=entry.reevaluation_pending,
         status_label=label,
-        current_version=LibraryVersionRead.model_validate(current) if current else None,
-        versions=[LibraryVersionRead.model_validate(version) for version in versions],
-        supporting_claim_ids=[
-            row[0]
-            for row in db.query(ReferenceEntryClaim.claim_id).filter(ReferenceEntryClaim.entry_id == entry.id).all()
+        current_version=_version_read(current) if current else None,
+        versions=[_version_read(version) for version in versions],
+        supporting_claim_ids=claim_ids,
+        supporting_claims=[LibraryClaimBrief(id=claim.id, body=claim.body) for claim in claims],
+        source_ids=source_ids,
+        sources=[
+            LibrarySourceBrief(
+                id=source.id,
+                title=source.title,
+                url=source.url,
+                document_reference=source.document_reference,
+            )
+            for source in sources
         ],
-        source_ids=[
-            row[0]
-            for row in db.query(ReferenceEntrySource.source_id).filter(ReferenceEntrySource.entry_id == entry.id).all()
-        ],
-        verification_event_ids=[
-            row[0]
-            for row in db.query(ReferenceEntryVerification.verification_event_id)
-            .filter(ReferenceEntryVerification.entry_id == entry.id)
-            .all()
+        verification_event_ids=event_ids,
+        verifications=[
+            LibraryVerificationBrief(
+                id=event.id,
+                subject_type=event.subject_type.value,
+                result_status=event.result_status.value,
+                method=event.method,
+                mistake_reason=event.mistake_reason,
+            )
+            for event in events
         ],
         requests=[ReevaluationRead.model_validate(item) for item in requests],
         created_at=entry.created_at,

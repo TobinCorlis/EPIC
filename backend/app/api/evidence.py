@@ -39,16 +39,16 @@ def create_source(payload: SourceCreate, db: Session = Depends(get_db), user: Us
         author=payload.author,
         publication_date=payload.publication_date,
         source_type=payload.source_type,
-        source_type_reviewed=False,
-        verification_status=SourceVerificationStatus.unverified,
-        quality_score=quality_score,
-        quality_rationale=rationale,
         scope_population=payload.scope_population,
         scope_timeframe=payload.scope_timeframe,
         scope_geography=payload.scope_geography,
         scope_metric=payload.scope_metric,
         scope_study_type=payload.scope_study_type,
         scope_sample_size=payload.scope_sample_size,
+        source_type_reviewed=False,
+        verification_status=SourceVerificationStatus.unverified,
+        quality_score=quality_score,
+        quality_rationale=rationale,
     )
     db.add(source)
     try:
@@ -116,9 +116,25 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
     confidence = assess_claim(db, claim_id)
     flags = review_claim_scope(db, claim)
     db.commit()
+    links_by_id = {link.id: link for link in links}
+    items = []
+    for item in summary.items:
+        payload = dict(item.__dict__)
+        link = links_by_id.get(item.claim_evidence_id)
+        if link is not None and link.citation is not None and link.citation.source is not None:
+            source = link.citation.source
+            payload["source_id"] = source.id
+            payload["source_title"] = source.title
+            payload["scope_population"] = link.scope_population or source.scope_population
+            payload["scope_timeframe"] = link.scope_timeframe or source.scope_timeframe
+            payload["scope_geography"] = link.scope_geography or source.scope_geography
+            payload["scope_metric"] = link.scope_metric or source.scope_metric
+            payload["scope_study_type"] = link.scope_study_type or source.scope_study_type
+            payload["scope_sample_size"] = link.scope_sample_size if link.scope_sample_size is not None else source.scope_sample_size
+        items.append(EvidenceItemRead(**payload))
     return ClaimEvidenceSummary(
         claim_id=claim_id,
-        items=[EvidenceItemRead(**item.__dict__) for item in summary.items],
+        items=items,
         strongest_effective_tier=summary.strongest_effective_tier,
         independent_source_count=summary.independent_source_count,
         citation_count=summary.citation_count,

@@ -139,7 +139,10 @@ def create_argument_node(
 @router.get("/debates/{debate_id}/arguments", response_model=list[ArgumentNodeRead])
 def list_argument_nodes(debate_id: int, db: Session = Depends(get_db)):
     require_debate(db, debate_id)
-    return db.query(ArgumentNode).filter(ArgumentNode.debate_id == debate_id).order_by(ArgumentNode.id).all()
+    nodes = db.query(ArgumentNode).filter(ArgumentNode.debate_id == debate_id).order_by(ArgumentNode.id).all()
+    for node in nodes:
+        annotate_point(db, node, argument_node_id=node.id)
+    return nodes
 
 
 @router.patch("/arguments/{argument_id}/verification", response_model=ArgumentNodeRead)
