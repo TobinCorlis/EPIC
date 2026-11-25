@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.models.auth import User
 from app.models.claim import Claim
 from app.models.evidence import Citation, ClaimEvidence, Source
+from app.core.clock import utcnow
 from app.models.factcheck import SourceCheck, VerificationJob
 from app.schemas.evidence import SourceRead
 from app.schemas.factcheck import SourceCheckRead, SourceUpdate, VerificationJobRead
@@ -80,8 +81,33 @@ def rerun_source_checks(
 ):
     if db.get(Source, source_id) is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    run_source_checks(db, source_id, transport=get_transport(), actor_id=user.id)
+    job = VerificationJob(
+        subject_type="source",
+        subject_id=source_id,
+        status="running",
+        requested_by_user_id=user.id,
+        attempt_count=1,
+        claimed_at=utcnow(),
+        worker_id="api",
+    )
+    db.add(job)
     db.commit()
+    try:
+        run_source_checks(db, source_id, transport=get_transport(), actor_id=user.id)
+        job = db.get(VerificationJob, job.id)
+        if job is not None:
+            job.status = "completed"
+            job.completed_at = utcnow()
+            job.error_message = None
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        job = db.get(VerificationJob, job.id)
+        if job is not None:
+            job.status = "check_failed"
+            job.error_message = str(exc)[:2000]
+            db.commit()
+        raise
     return _checks_for_source(db, source_id)
 
 
@@ -112,8 +138,33 @@ def rerun_claim_checks(
 ):
     if db.get(Claim, claim_id) is None:
         raise HTTPException(status_code=404, detail="Claim not found")
-    run_claim_checks(db, claim_id, transport=get_transport(), actor_id=user.id)
+    job = VerificationJob(
+        subject_type="claim",
+        subject_id=claim_id,
+        status="running",
+        requested_by_user_id=user.id,
+        attempt_count=1,
+        claimed_at=utcnow(),
+        worker_id="api",
+    )
+    db.add(job)
     db.commit()
+    try:
+        run_claim_checks(db, claim_id, transport=get_transport(), actor_id=user.id)
+        job = db.get(VerificationJob, job.id)
+        if job is not None:
+            job.status = "completed"
+            job.completed_at = utcnow()
+            job.error_message = None
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        job = db.get(VerificationJob, job.id)
+        if job is not None:
+            job.status = "check_failed"
+            job.error_message = str(exc)[:2000]
+            db.commit()
+        raise
     return list_claim_checks(claim_id, db)
 
 
@@ -130,7 +181,7 @@ def factcheck_queue(db: Session = Depends(get_db), _: User = Depends(require_aut
         db.query(SourceCheck)
         .filter(
             SourceCheck.result == "possible_corroboration",
-            SourceCheck.detail.startswith("Systematic review"),
+            SourceCheck.detail.contains("Systematic review"),
         )
         .order_by(SourceCheck.id.desc())
         .limit(50)

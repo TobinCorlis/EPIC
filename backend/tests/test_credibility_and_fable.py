@@ -61,7 +61,7 @@ def test_identity_does_not_change_a_claims_own_support():
     _link(other_source_claim["id"], academy["id"])
     kept_score = _confidence(kept["id"])
     academy_score = _confidence(other_source_claim["id"])
-    assert kept_score["label"] == "Rated"
+    assert kept_score["label"] == "Weakly supported"
     assert kept_score["confidence_score"] == academy_score["confidence_score"]
     assert kept_score["confidence_score"] > 0
     unsupported = _claim("The same group also says the earth is flat.")
@@ -75,7 +75,7 @@ def test_identity_does_not_change_a_claims_own_support():
     _link(refuted["id"], geodetic["id"], "contradicts")
     assert _confidence(refuted["id"])["label"] == "Refuted"
     still = _confidence(kept["id"])
-    assert still["label"] == "Rated"
+    assert still["label"] == "Weakly supported"
     assert still["confidence_score"] == kept_score["confidence_score"]
 
 
@@ -109,7 +109,7 @@ def test_not_factually_answerable_is_not_scored_or_reused():
     assert sub.status_code == 201, sub.text
     _link(sub.json()["id"], source["id"])
     scored = _confidence(sub.json()["id"])
-    assert scored["label"] == "Rated"
+    assert scored["label"] == "Weakly supported"
     opinion = client.post(f"/debates/{debate.json()['id']}/claims", json={
         "body": "Star Wars would beat Star Trek.",
         "claim_type": "opinion",
@@ -163,7 +163,7 @@ def test_old_library_version_without_a_label_is_recomputed():
         version.confidence_json = json.dumps(stored)
         db.commit()
     refreshed = client.get(f"/library/entries/{entry.json()['id']}").json()
-    assert refreshed["current_version"]["confidence"][0]["label"] in {"Rated", "Unsupported", "Refuted", "Unknown – not yet rated"}
+    assert refreshed["current_version"]["confidence"][0]["label"] in {"Rated", "Weakly supported", "Supported", "Unsupported", "Refuted", "Unknown – not yet rated"}
     assert refreshed["current_version"]["confidence"][0]["label"] != "Rated" or "label" in json.dumps(refreshed["current_version"]["confidence"][0])
 
 

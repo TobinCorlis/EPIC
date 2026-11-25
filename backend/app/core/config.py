@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     factcheck_llm_model: str = ""
     courtlistener_api_token: str = ""
     govinfo_api_key: str = ""
+    support_score_threshold: float = 0.6
+    factcheck_lead_min_overlap: float = 0.25
+    factcheck_lead_limit: int = 3
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("allowed_origins", "trusted_hosts", mode="before")

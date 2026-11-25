@@ -144,6 +144,10 @@ class ConfidenceAssessmentRead(BaseModel):
     factors: list[ConfidenceFactorRead]
     automated_source_check: str
     automated_source_check_detail: str
+    attribution_verified: bool = False
+    attribution_note: str | None = None
+    support_threshold: float | None = None
+    claim_role: str | None = None
 
 
 class ScopeFlagRead(BaseModel):

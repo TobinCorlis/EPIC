@@ -877,7 +877,7 @@ def record_upstream_invalidation(db: Session, user, payload, actor: str | None =
         reason=payload.reason.strip(),
         source_id=payload.source_id,
         recorded_by_user_id=user.id,
-        actor=actor or getattr(user, "display_name", None),
+        actor=actor or f"user:{user.id}",
     )
     db.add(invalidation)
     db.flush()

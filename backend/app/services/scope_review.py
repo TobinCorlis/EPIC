@@ -88,7 +88,7 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
     )
     seen_suggestions = set()
     for check in suggestions:
-        if not (check.detail or "").startswith("Systematic review"):
+        if "Systematic review" not in (check.detail or ""):
             continue
         key = check.evidence_url or check.response_id or str(check.id)
         if key in seen_suggestions:
@@ -121,6 +121,7 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
     db.query(ScopeReviewFlag).filter(ScopeReviewFlag.claim_id == claim.id).delete()
     for flag in flags:
         db.add(flag)
-    if flags:
-        claim.needs_review = True
+    from app.services.claim_confidence import merge_review_reason
+
+    merge_review_reason(claim, "scope_flag", bool(flags))
     return flags

@@ -24,6 +24,8 @@ class Claim(Base):
     citation_required: Mapped[bool] = mapped_column(Boolean, default=True)
     on_topic: Mapped[bool] = mapped_column(Boolean, default=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
+    needs_review_reasons: Mapped[str] = mapped_column(Text, default="[]")
+    claim_role: Mapped[str] = mapped_column(String(20), default="substantive")
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
     scope_population: Mapped[str | None] = mapped_column(String(300), nullable=True)

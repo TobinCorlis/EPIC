@@ -186,7 +186,7 @@ def test_weaker_contradiction_does_not_refute_stronger_reviewed_support():
     _link(claim["id"], government["id"], "supports")
     _link(claim["id"], blog["id"], "contradicts")
     confidence = _summary(claim["id"])
-    assert confidence["label"] == "Rated"
+    assert confidence["label"] == "Weakly supported"
     assert confidence["confidence_score"] > 0
     assert confidence["contradicting_sources"] == []
     assert confidence["factors"][0]["value"] == round(7 / 8, 2)

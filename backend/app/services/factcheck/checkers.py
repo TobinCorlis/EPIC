@@ -17,6 +17,7 @@ from app.services.factcheck.text import (
     field_matches,
     jaccard,
     quote_match,
+    tokens,
 )
 
 CROSSREF = "api.crossref.org"
@@ -542,7 +543,7 @@ def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str,
     text = extract_text(body, content_type)
     result, score, snippet = quote_match(excerpt, text)
     detail = {
-        "quote_found": "The quoted text appears in the accessible text.",
+        "quote_found": "The quoted text appears in the accessible text. This verifies attribution, not that the claim is true.",
         "quote_not_found": "The quoted text was not found in the accessible text. This lowers support and flags review. It is not a refutation.",
         "text_not_accessible": "The source text could not be read (paywall, scan, or no extractor). The quote was not treated as missing.",
     }[result]
@@ -561,21 +562,55 @@ def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str,
     )
 
 
-def classify_related(title: str, work_type: str) -> tuple[str, str]:
+def topic_overlap(claim_text: str, title: str) -> float:
+    """Share of the claim's content words that also appear in the title."""
+    stop = {
+        "the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "with", "by",
+        "is", "are", "was", "were", "be", "this", "that", "from", "as", "at", "it",
+    }
+    claim_tokens = {token for token in tokens(claim_text) if token not in stop and len(token) > 2}
+    title_tokens = {token for token in tokens(title) if token not in stop and len(token) > 2}
+    if not claim_tokens or not title_tokens:
+        return 0.0
+    return len(claim_tokens & title_tokens) / len(claim_tokens)
+
+
+def topic_strength(score: float) -> str:
+    if score >= 0.6:
+        return "strong"
+    if score >= 0.4:
+        return "partial"
+    return "weak"
+
+
+def lead_passes(claim_text: str, title: str, relevance: float | None) -> tuple[bool, float, str]:
+    """Drop a lead unless the title overlaps the claim. Relevance cannot rescue an off-topic title."""
+    overlap = topic_overlap(claim_text, title)
+    if relevance is None or relevance <= 0:
+        score = overlap
+    else:
+        score = overlap * (0.5 + 0.5 * min(1.0, float(relevance) / max(float(relevance), 1.0)))
+        if overlap == 0:
+            score = 0.0
+    strength = topic_strength(score)
+    return score >= settings.factcheck_lead_min_overlap and overlap > 0, round(score, 2), strength
+
+
+def classify_related(title: str, work_type: str, strength: str) -> tuple[str, str]:
     blob = f"{title} {work_type}".casefold()
     if "systematic review" in blob or "meta-analysis" in blob or "meta analysis" in blob:
         return (
             "possible_corroboration",
-            "Systematic review or meta-analysis. Candidate only. It is not linked evidence and does not change the score.",
+            f"Topic match: {strength}. Systematic review or meta-analysis. Candidate only. It is not linked evidence and does not change the score.",
         )
     if "retract" in blob or "expression of concern" in blob:
         return (
             "possible_counterevidence",
-            "Candidate counterevidence only. It is not linked evidence and does not change the score.",
+            f"Topic match: {strength}. Candidate counterevidence only. It is not linked evidence and does not change the score.",
         )
     return (
         "possible_corroboration",
-        "Possible corroboration only. It is not linked evidence and does not change the score.",
+        f"Topic match: {strength}. Possible corroboration only. It is not linked evidence and does not change the score.",
     )
 
 
@@ -588,19 +623,25 @@ def openalex_related(transport, claim_text: str, claim_id: int) -> list[dict]:
     if response.error or response.status != 200:
         return [_failed("related_work", OPENALEX, query, response, f"OpenAlex related search failed. {response.error or ''}".strip())]
     payload = _loads(response) or {}
-    rows = []
-    for work in (payload.get("results") or [])[:5]:
+    ranked = []
+    for work in payload.get("results") or []:
         if not isinstance(work, dict):
             continue
         title = str(work.get("display_name") or "")
-        work_type = str(work.get("type") or "")
-        result, detail = classify_related(title, work_type)
-        work_id = str(work.get("id") or "")
+        passed, score, strength = lead_passes(claim_text, title, work.get("relevance_score"))
+        if not passed:
+            continue
+        ranked.append((score, strength, title, str(work.get("type") or ""), str(work.get("id") or "")))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    rows = []
+    for score, strength, title, work_type, work_id in ranked[: settings.factcheck_lead_limit]:
+        result, detail = classify_related(title, work_type, strength)
         rows.append(_draft(
             checker_name="related_work",
             api_name=OPENALEX,
             query=query,
             result=result,
+            match_score=score,
             claim_id=claim_id,
             response_id=work_id or None,
             evidence_url=work_id or None,
@@ -638,19 +679,24 @@ def pubmed_related(transport, claim_text: str, claim_id: int) -> list[dict]:
         if not isinstance(record, dict):
             continue
         title = str(record.get("title") or "")
+        passed, score, strength = lead_passes(claim_text, title, None)
+        if not passed:
+            continue
         pubtypes = " ".join(str(item) for item in record.get("pubtype") or [])
-        result, detail = classify_related(title, pubtypes)
+        result, detail = classify_related(title, pubtypes, strength)
         rows.append(_draft(
             checker_name="related_work",
             api_name=PUBMED,
             query=query,
             result=result,
+            match_score=score,
             claim_id=claim_id,
             response_id=pmid,
             evidence_url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}",
             detail=f"{detail} Title: {title}",
         ))
-    return rows
+    rows.sort(key=lambda row: row.get("match_score") or 0, reverse=True)
+    return rows[: settings.factcheck_lead_limit]
 
 
 def llm_configured() -> bool:

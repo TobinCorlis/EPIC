@@ -76,7 +76,8 @@ function confidenceBlock(confidence) {
   if (confidence.not_factually_answerable) {
     return `<p><b>Not factually answerable.</b> This question has no factual answer. ${esc(confidence.answerability_reason || '')}</p>`;
   }
-  const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Rated');
+  const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Weakly supported');
+  const scoreBeside = confidence.confidence_score == null ? '' : ` (${formatFactor(confidence.confidence_score)})`;
   const factors = (confidence.factors || []).map(factor =>
     `<li><b>${esc(factor.name)}</b>: ${esc(formatFactor(factor.value))}. ${esc(factor.detail || '')}</li>`
   ).join('');
@@ -87,7 +88,8 @@ function confidenceBlock(confidence) {
   const contradictions = (confidence.contradicting_sources || []).length
     ? `<p><b>Contradicting sources:</b> ${(confidence.contradicting_sources || []).map(source => esc(source.title || ('Source #' + source.id))).join(', ')}</p>`
     : '';
-  return `<div class="confidence"><p><b>Confidence:</b> ${esc(formatScore(confidence.confidence_score))}. <b>${esc(label)}</b></p>${missing}${contradictions}${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
+  const attribution = confidence.attribution_note ? `<p><b>Attribution:</b> ${esc(confidence.attribution_note)}</p>` : '';
+  return `<div class="confidence"><p><b>Confidence:</b> ${esc(formatScore(confidence.confidence_score))}. <b>${esc(label)}${scoreBeside}</b></p>${attribution}${missing}${contradictions}${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
 }
 
 function confidenceList(value) {
@@ -383,6 +385,7 @@ async function addClaim() {
     const claim = await api(`/debates/${currentDebate.id}/claims`, {method: 'POST', body: JSON.stringify({
       body: $('claimBody').value,
       claim_type: $('claimType').value,
+      claim_role: $('claimRole').value,
       uncertainty: $('claimUncertainty').value || null,
       scope_population: $('claimPopulation').value || null,
       scope_timeframe: $('claimTimeframe').value || null,

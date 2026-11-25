@@ -56,6 +56,17 @@ LABEL_REFUTED = "Refuted"
 LABEL_UNRATED = "Unknown – not yet rated"
 LABEL_RATED = "Rated"
 LABEL_SUPPORTED = "Supported"
+LABEL_WEAK = "Weakly supported"
+FACTCHECK_REASON_CODES = {
+    "no_record",
+    "quote_not_found",
+    "text_not_accessible",
+    "low_confidence",
+    "check_failed",
+    "metadata_mismatch",
+    "retraction",
+    "refuted",
+}
 NO_RECORD = "cited source: no record found"
 SCORE_SCALE = "0–1"
 SUPPORT_RULE = "Supported or verified requires recorded supporting evidence with a reviewed tier."
@@ -210,6 +221,65 @@ def support_qualifies(db: Session, claim_ids: list[int]) -> bool:
     )
 
 
+def replace_factcheck_reasons(claim, reasons: list[str]) -> None:
+    """Replace fact-check reasons and keep reasons set by other checks."""
+    raw = getattr(claim, "needs_review_reasons", None) or "[]"
+    try:
+        current = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except json.JSONDecodeError:
+        current = []
+    if not isinstance(current, list):
+        current = []
+    kept = [item for item in current if item not in FACTCHECK_REASON_CODES]
+    merged = kept + [item for item in reasons if item not in kept]
+    claim.needs_review_reasons = json.dumps(merged)
+    claim.needs_review = bool(merged)
+
+
+def merge_review_reason(claim, code: str, present: bool) -> None:
+    raw = getattr(claim, "needs_review_reasons", None) or "[]"
+    try:
+        current = json.loads(raw) if isinstance(raw, str) else list(raw or [])
+    except json.JSONDecodeError:
+        current = []
+    if not isinstance(current, list):
+        current = []
+    current = [item for item in current if item != code]
+    if present:
+        current.append(code)
+    claim.needs_review_reasons = json.dumps(current)
+    claim.needs_review = bool(current)
+
+
+def _apply_support_label(breakdown: dict, claim, *, attribution_verified: bool, independent_count: int) -> None:
+    """Supported requires the score threshold and the evidence gate. A low score never carries it."""
+    from app.core.config import settings
+
+    score = breakdown.get("confidence_score")
+    label = breakdown.get("label")
+    breakdown["support_threshold"] = settings.support_score_threshold
+    breakdown["attribution_verified"] = attribution_verified
+    breakdown["claim_role"] = getattr(claim, "claim_role", None) or "substantive"
+    breakdown["attribution_note"] = (
+        "Attribution verified: the cited source contains this text. That is not a finding that the claim is true."
+        if attribution_verified
+        else "Attribution is not verified. A quote match is not assumed."
+    )
+    if label in {LABEL_UNSUPPORTED, LABEL_REFUTED} or score == 0:
+        return
+    if score is None:
+        return
+    role = breakdown["claim_role"]
+    if role == "attribution":
+        eligible = attribution_verified
+    else:
+        eligible = independent_count >= 2
+    if eligible and score >= settings.support_score_threshold:
+        breakdown["label"] = LABEL_SUPPORTED
+    elif score > 0:
+        breakdown["label"] = LABEL_WEAK
+
+
 def _assessment(
     score,
     label: str,
@@ -290,7 +360,11 @@ def assess_claim(db: Session, claim_id: int) -> dict:
             continue
         quote_ok = quote == "quote_found" or (llm_ok and confirmed.get(source_id))
         reviewed = source_has_reviewed_support(source, findability.get(source_id))
-        if reviewed or (confirmed.get(source_id) and quote_ok):
+        role = (claim.claim_role if claim is not None else None) or "substantive"
+        if role == "attribution":
+            if confirmed.get(source_id) and quote_ok:
+                weighed.append(link)
+        elif reviewed:
             weighed.append(link)
     unrated = [
         link for link in supporting
@@ -355,33 +429,26 @@ def assess_claim(db: Session, claim_id: int) -> dict:
             contradicting=[_source_brief(link) for link in stronger],
         )
     elif weighed:
-        automated_support = any(
-            confirmed.get(link.citation.source.id)
-            and (quote_by.get(link.citation_id) == "quote_found" or llm_ok)
-            for link in weighed
-        )
         breakdown = _rated_breakdown(
             db,
             weighed,
             contradicting,
             missing_note,
-            label=LABEL_SUPPORTED if automated_support else LABEL_RATED,
+            label=LABEL_RATED,
             confirmed=confirmed,
+            attribution=(claim.claim_role if claim is not None else None) == "attribution",
         )
     elif quote_blocked:
         breakdown = _assessment(
             None,
             LABEL_UNRATED,
             [
-                _factor("tier", None, "The cited record was found, but the quoted text was not in the accessible text. This stays below Supported and is flagged for review."),
-                _factor("track_record", None, "Not applied until the quoted support is established."),
-                _factor("independent_corroboration", None, "A quote that was not found does not corroborate the claim."),
+                _factor("tier", None, "The cited record was found, but the quoted text was not in the accessible text. Attribution is not verified. This is not a finding that the claim is false."),
+                _factor("track_record", None, "Not applied until the quoted text is found."),
+                _factor("independent_corroboration", None, "A missing quote does not corroborate the claim."),
                 _factor("counterevidence", None, "Not applied."),
             ],
         )
-        claim = db.get(Claim, claim_id)
-        if claim is not None:
-            claim.needs_review = True
     elif unrated and not missing:
         titles = ", ".join(f"'{link.citation.source.title}'" for link in unrated)
         breakdown = _assessment(
@@ -415,17 +482,53 @@ def assess_claim(db: Session, claim_id: int) -> dict:
         for factor in breakdown["factors"]:
             if line not in factor["detail"]:
                 factor["detail"] = f"{factor['detail']} {line}"
-    if any(status in {"not_findable", "check_failed", "low_confidence"} for status in findability.values()) or any(
-        review_signal(db, source_id) for source_id in findability
-    ):
-        claim = db.get(Claim, claim_id)
-        if claim is not None:
-            claim.needs_review = True
+    attribution_verified = any(
+        (quote_by.get(link.citation_id) == "quote_found" or (llm_ok and confirmed.get(link.citation.source.id)))
+        and link.citation.source.id not in retracted
+        and findability.get(link.citation.source.id) != "not_findable"
+        for link in supporting
+    )
+    independent_count = len({independence_key(link.citation.source) for link in weighed})
+    claim = db.get(Claim, claim_id)
+    if claim is not None:
+        _apply_support_label(
+            breakdown,
+            claim,
+            attribution_verified=attribution_verified,
+            independent_count=independent_count,
+        )
+        reasons = []
+        if breakdown.get("cited_source_note") == NO_RECORD or any(status == "not_findable" for status in findability.values()):
+            reasons.append("no_record")
+        if any(quote_by.get(link.citation_id) == "quote_not_found" for link in supporting):
+            reasons.append("quote_not_found")
+        if any(quote_by.get(link.citation_id) == "text_not_accessible" for link in supporting):
+            reasons.append("text_not_accessible")
+        if any(status == "low_confidence" for status in findability.values()):
+            reasons.append("low_confidence")
+        if any(status == "check_failed" for status in findability.values()):
+            reasons.append("check_failed")
+        if any(review_signal(db, source_id) for source_id in findability):
+            from app.services.factcheck.status import source_rows
+
+            for source_id in findability:
+                latest = {row.checker_name: row for row in source_rows(db, source_id)}
+                if latest.get("metadata") is not None and latest["metadata"].result == "mismatch":
+                    reasons.append("metadata_mismatch")
+                if latest.get("retraction") is not None and latest["retraction"].result == "retracted":
+                    reasons.append("retraction")
+        if breakdown.get("label") == LABEL_REFUTED:
+            reasons.append("refuted")
+        replace_factcheck_reasons(claim, list(dict.fromkeys(reasons)))
+    else:
+        _apply_support_label(
+            breakdown,
+            type("ClaimRole", (), {"claim_role": "substantive"})(),
+            attribution_verified=attribution_verified,
+            independent_count=independent_count,
+        )
     _store(db, claim_id, breakdown)
     _apply_to_knowledge(db, claim_id, breakdown)
-    claim = db.get(Claim, claim_id)
-    if claim is not None and (breakdown["label"] == LABEL_REFUTED or breakdown["cited_source_note"] == NO_RECORD):
-        claim.needs_review = True
     return breakdown
 
 
@@ -437,6 +540,7 @@ def _rated_breakdown(
     quote_missing: bool = False,
     label: str = LABEL_RATED,
     confirmed: dict | None = None,
+    attribution: bool = False,
 ) -> dict:
     confirmed = confirmed or {}
     best = max(weighed, key=lambda link: _tier(link.citation.source, confirmed.get(link.citation.source.id, False)))
@@ -469,7 +573,15 @@ def _rated_breakdown(
             "The factor is confirmed / (confirmed + adverse) for this source only."
         )
     independent = {independence_key(link.citation.source) for link in weighed}
-    corroboration = min(len(independent), 3) / 3
+    if attribution:
+        corroboration = 1.0
+        corroboration_detail = (
+            f"{len(independent)} cited source(s). A single source containing the quoted text is not "
+            "independent corroboration of a separate fact. The factor is 1 because this claim is only that the source says this."
+        )
+    else:
+        corroboration = min(len(independent), 3) / 3
+        corroboration_detail = f"{len(independent)} independent supporting source(s). The factor saturates at 3. One source is not enough to call a substantive claim Supported."
     unrefuted = []
     refuted_count = 0
     for link in contradicting:
@@ -494,7 +606,7 @@ def _rated_breakdown(
         [
             _factor("tier", tier_factor, tier_detail),
             _factor("track_record", record.track_factor, track_detail),
-            _factor("independent_corroboration", corroboration, f"{len(independent)} independent supporting source(s). The factor saturates at 3."),
+            _factor("independent_corroboration", corroboration, corroboration_detail),
             _factor(
                 "counterevidence",
                 counter_factor,

@@ -92,12 +92,15 @@ def _source(headers, title, url, document=None, source_type="peer_reviewed", aut
     return created.json()
 
 
-def _debate_claim(body):
+def _debate_claim(body, role="substantive"):
     debate = client.post(
         "/debates",
         json={"title": f"Fact {next(_seq)}", "fixed_question": "Did the cited record say this?", "description": "A fact check."},
     ).json()
-    claim = client.post(f"/debates/{debate['id']}/claims", json={"body": body, "claim_type": "factual"})
+    claim = client.post(
+        f"/debates/{debate['id']}/claims",
+        json={"body": body, "claim_type": "factual", "claim_role": role},
+    )
     assert claim.status_code == 201, claim.text
     return claim.json()
 
@@ -183,7 +186,7 @@ def test_metadata_mismatch_is_review_not_absence():
     assert next(row["result"] for row in checks if row["checker_name"] == "crossref") == "found"
     assert next(row["result"] for row in checks if row["checker_name"] == "metadata") == "mismatch"
     summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()
-    assert summary["confidence"]["label"] == "Rated"
+    assert summary["confidence"]["label"] == "Weakly supported"
     flagged = client.get(f"/debates/{claim['debate_id']}/claims").json()[0]
     assert flagged["needs_review"] is True
 
@@ -220,7 +223,7 @@ def test_network_failure_is_check_failed_and_not_verified():
     assert any(row["result"] == "check_failed" and row["checker_name"] == "crossref" for row in checks)
     summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()
     assert summary["confidence"]["automated_source_check"] == "check_failed"
-    assert summary["confidence"]["label"] == "Rated"
+    assert summary["confidence"]["label"] == "Weakly supported"
     stored = client.get(f"/sources/{source['id']}").json()
     assert stored["verification_status"] == "unverified"
     blocked = client.post(
@@ -443,8 +446,8 @@ def test_related_work_stays_a_candidate_and_a_review_is_only_a_suggestion():
     before = client.get(f"/claims/{claim['id']}/evidence-summary").json()
     rows = client.post(f"/claims/{claim['id']}/checks", headers=headers).json()
     after = client.get(f"/claims/{claim['id']}/evidence-summary").json()
-    assert before["confidence"]["label"] == "Rated"
-    assert after["confidence"]["label"] == "Rated"
+    assert before["confidence"]["label"] == "Weakly supported"
+    assert after["confidence"]["label"] == "Weakly supported"
     assert any(row["result"] == "possible_corroboration" and "Systematic review" in row["detail"] for row in rows)
     assert any(row["result"] == "possible_counterevidence" for row in rows)
     assert any(flag["kind"] == "consensus_suggestion" for flag in after["scope_flags"])
@@ -612,7 +615,7 @@ def test_workspace_shows_the_verification_panel():
     assert "Re-run checks" in script
     assert "Verification queue" in page
     assert "Automated lookup of cited sources is not implemented" not in script
-    assert "app.js?v=21" in page
+    assert "app.js?v=22" in page
     assert "Source #" in script and "Existence" in script and "Archive" in script
 
 
@@ -647,7 +650,7 @@ def test_url_fetch_beats_a_weak_openalex_title_match():
 def test_matching_quote_on_a_confirmed_doi_scores_above_zero_and_can_be_supported():
     headers, _user_id = _user()
     source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/quoted")
-    claim = _debate_claim("The paper says the shoreline rose by one meter.")
+    claim = _debate_claim("Ioannidis wrote that most published findings are false.", role="attribution")
     _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
     set_transport(FakeTransport([
         (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/quoted", "Measured shoreline")),
@@ -658,12 +661,137 @@ def test_matching_quote_on_a_confirmed_doi_scores_above_zero_and_can_be_supporte
     ]))
     client.post(f"/sources/{source['id']}/checks", headers=headers)
     summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
-    assert summary["confidence_score"] > 0
+    assert summary["confidence_score"] >= 0.6
     assert summary["label"] == "Supported"
+    assert summary["attribution_verified"] is True
+    assert "not a finding that the claim is true" in (summary["attribution_note"] or "")
     assert "automated check" in summary["automated_source_check_detail"]
     panel = client.get(f"/claims/{claim['id']}/checks").json()
     assert any(row["checker_name"] == "crossref" and row["result"] == "found" for row in panel)
     assert any(row["checker_name"] == "metadata" and row["result"] == "found" for row in panel)
+
+
+def test_substantive_claim_is_not_supported_by_one_quote():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/substantive")
+    claim = _debate_claim("Most published findings are false.", role="substantive")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/substantive", "Measured shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/substantive"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/substantive",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["attribution_verified"] is True
+    assert summary["label"] != "Supported"
+    assert summary["confidence_score"] is None or summary["confidence_score"] < 0.6
+
+
+def test_low_score_is_not_labeled_supported(monkeypatch):
+    monkeypatch.setattr(settings, "support_score_threshold", 0.6)
+    headers, _user_id = _user(UserRole.moderator)
+    source = _source(headers, "One agency table", f"https://example.gov/one-table-{next(_seq)}", source_type="government_record")
+    claim = _debate_claim("The agency published one figure.")
+    _link(claim["id"], source["id"])
+    _review(headers, source["id"])
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert 0 < summary["confidence_score"] < 0.6
+    assert summary["label"] == "Weakly supported"
+    assert summary["support_threshold"] == 0.6
+
+
+def test_off_topic_related_work_is_not_stored_as_a_lead():
+    headers, _user_id = _user()
+    source = _source(headers, "Ioannidis essay", "https://doi.org/10.1000/ioannidis")
+    claim = _debate_claim("Most published research findings are false.")
+    _link(claim["id"], source["id"])
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/ioannidis", "Ioannidis essay")),
+        (lambda method, url: "api.openalex.org/works?search=" in url, json_response(200, {"results": [
+            {"id": "https://openalex.org/W-eeg", "display_name": "EEG practice guidelines", "type": "article", "relevance_score": 80},
+            {"id": "https://openalex.org/W-esteem", "display_name": "Self-esteem measurement", "type": "article", "relevance_score": 70},
+            {"id": "https://openalex.org/W-gwas", "display_name": "GWAS power calculations", "type": "article", "relevance_score": 60},
+            {"id": "https://openalex.org/W-hit", "display_name": "Why most published research findings are false", "type": "article", "relevance_score": 40},
+        ]})),
+        (lambda method, url: "esearch" in url, json_response(200, {"esearchresult": {"idlist": []}})),
+    ]))
+    rows = client.post(f"/claims/{claim['id']}/checks", headers=headers).json()
+    leads = [row for row in rows if row["checker_name"] == "related_work"]
+    assert len(leads) == 1
+    assert "findings are false" in leads[0]["detail"]
+    assert "Topic match:" in leads[0]["detail"]
+    assert leads[0]["result"] == "possible_corroboration"
+    assert not any("EEG" in row["detail"] or "esteem" in row["detail"] or "GWAS" in row["detail"] for row in leads)
+
+
+def test_needs_review_clears_when_the_record_is_found():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/cleared")
+    claim = _debate_claim("The paper recorded the shoreline.", role="attribution")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    from app.models.claim import Claim
+
+    with SessionLocal() as db:
+        row = db.get(Claim, claim["id"])
+        row.needs_review = True
+        row.needs_review_reasons = '["no_record"]'
+        db.commit()
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/cleared", "Measured shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/cleared"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/cleared",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    stored = client.get(f"/debates/{claim['debate_id']}/claims").json()[0]
+    assert "no_record" not in stored["needs_review_reasons"]
+    assert stored["needs_review"] is False
+
+
+def test_on_demand_check_is_an_auditable_job():
+    headers, _user_id = _user()
+    source = _source(headers, "Audit study", "https://doi.org/10.1000/audit-job")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/audit-job", "Audit study")),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    jobs = client.get("/factcheck/jobs", headers=headers).json()
+    match = [job for job in jobs if job["subject_type"] == "source" and job["subject_id"] == source["id"] and job.get("status") == "completed"]
+    assert match
+
+
+def test_invalidation_actor_backfill_uses_the_recorded_user():
+    from app.models.auth import User
+    from app.models.evidence import Source
+    from app.services.factcheck.backfill import backfill_invalidation_actors
+
+    headers, user_id = _user()
+    source = _source(headers, "Backfill source", f"https://example.edu/backfill-{next(_seq)}")
+    with SessionLocal() as db:
+        notice = Source(title="Backfill notice", document_reference=f"backfill-{next(_seq)}")
+        db.add(notice)
+        db.flush()
+        row = UpstreamInvalidation(
+            subject_type="source",
+            subject_id=source["id"],
+            kind="retraction",
+            reason="Recorded before actor was stored.",
+            source_id=notice.id,
+            recorded_by_user_id=user_id,
+            actor=None,
+        )
+        db.add(row)
+        db.commit()
+        row_id = row.id
+        backfill_invalidation_actors(db.get_bind())
+        db.expire_all()
+        stored = db.get(UpstreamInvalidation, row_id)
+        assert stored.actor == f"user:{user_id}"
+        assert db.get(User, user_id) is not None
 
 
 def test_absent_quote_on_a_confirmed_doi_does_not_reach_supported():
