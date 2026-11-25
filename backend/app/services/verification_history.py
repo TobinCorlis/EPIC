@@ -162,6 +162,9 @@ def overturn_verified_for_debate_claim(db: Session, claim_id: int, user: User | 
             continue
         seen.add(event.id)
         _demote_subject(db, event, user, reason)
+    from app.services.reference_library import mark_stale_for_claim
+
+    mark_stale_for_claim(db, claim_id)
 
 
 def record_verification_mistake(db: Session, event: VerificationEvent, user: User, reason: str) -> None:

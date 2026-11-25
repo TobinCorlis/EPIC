@@ -13,6 +13,8 @@ from app.schemas.claim import ClaimCreate, ClaimRead
 from app.schemas.status_history import StatusHistoryRead
 from app.schemas.debate import DebateCreate, DebateRead
 from app.services.moderation import evaluate_topic_alignment
+from app.services.reference_library import annotate_debate, annotate_point, consider_debate, consider_text
+from app.api.library import enqueue_after
 
 router = APIRouter(prefix="/debates", tags=["debates"])
 
@@ -26,8 +28,13 @@ def create_debate(
     enforce_write_access(user)
     debate = Debate(owner_user_id=user.id if user else None, **payload.model_dump())
     db.add(debate)
+    db.flush()
+    consider_debate(db, debate)
+    db.flush()
+    annotate_debate(db, debate)
     db.commit()
     db.refresh(debate)
+    annotate_debate(db, debate)
     return debate
 
 
@@ -36,6 +43,7 @@ def get_debate(debate_id: int, db: Session = Depends(get_db)):
     debate = db.get(Debate, debate_id)
     if not debate:
         raise HTTPException(status_code=404, detail="Debate not found")
+    annotate_debate(db, debate)
     return debate
 
 
@@ -69,8 +77,14 @@ def add_claim(
         scope_metric=payload.scope_metric,
     )
     db.add(claim)
+    db.flush()
+    job_ids = consider_text(db, debate, claim.body, claim_id=claim.id)
+    db.flush()
+    annotate_point(db, claim, claim_id=claim.id)
     db.commit()
+    enqueue_after(job_ids)
     db.refresh(claim)
+    annotate_point(db, claim, claim_id=claim.id)
     return claim
 
 
@@ -109,6 +123,7 @@ def list_claims(debate_id: int, db: Session = Depends(get_db)):
     claims = db.query(Claim).filter(Claim.debate_id == debate_id).order_by(Claim.id).all()
     result = []
     for claim in claims:
+        annotate_point(db, claim, claim_id=claim.id)
         payload = ClaimRead.model_validate(claim)
         payload.status_notes = _notes_for_claim(db, claim.id)
         result.append(payload)

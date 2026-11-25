@@ -52,5 +52,16 @@ from app.models.verification import RecordedVerificationStatus, VerificationEven
 from app.models.status_history import StatusHistory
 from app.models.confidence import ClaimConfidenceAssessment
 from app.models.scope import ScopeReviewFlag
+from app.models.library import (
+    LibraryPoint,
+    ReferenceEntry,
+    ReferenceEntryClaim,
+    ReferenceEntryDebate,
+    ReferenceEntrySource,
+    ReferenceEntryVerification,
+    ReferenceEntryVersion,
+    ReevaluationRequest,
+    UpstreamInvalidation,
+)
 from app.models.correction import ClaimCorrection
 from app.models.collaboration import DebateEvent, DebateInvitation, InvitationStatus, DebateTurn, DebateRoomState, TurnModerationReview, ModerationReviewStatus

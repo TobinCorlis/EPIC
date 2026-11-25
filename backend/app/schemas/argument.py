@@ -52,6 +52,10 @@ class ArgumentNodeRead(BaseModel):
     body: str
     verification_status: VerificationStatus
     status_history: list[StatusHistoryRead] = []
+    library_entry_id: int | None = None
+    library_point_id: int | None = None
+    library_point_status: str | None = None
+    library_notice: str | None = None
     created_at: datetime
 
 
