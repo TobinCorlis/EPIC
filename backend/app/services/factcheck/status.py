@@ -49,11 +49,11 @@ def findability_for_source(db: Session, source_id: int) -> str:
         return "not_findable"
     if any(row.result == "check_failed" for row in definitive):
         return "check_failed"
-    if openalex is not None and openalex.result == "low_confidence":
-        return "low_confidence"
     page_found = url is not None and url.result == "fetched" and url.http_status is not None and url.http_status < 400
     if page_found:
         return "found"
+    if openalex is not None and openalex.result == "low_confidence":
+        return "low_confidence"
     if url is not None and url.result == "not_found" and (openalex is None or openalex.result == "not_found"):
         return "not_findable"
     if openalex is not None and openalex.result == "not_found" and url is None:
@@ -61,6 +61,22 @@ def findability_for_source(db: Session, source_id: int) -> str:
     if any(row.result == "check_failed" for row in latest.values()):
         return "check_failed"
     return "not_checked"
+
+
+def automated_record_found(db: Session, source_id: int) -> bool:
+    """An identifier resolved, the entered metadata matches, and it is not retracted.
+
+    A bare URL fetch does not satisfy this gate. Provenance for a pass is
+    reported as an automated check.
+    """
+    if has_retraction(db, source_id):
+        return False
+    latest = _latest(source_rows(db, source_id))
+    definitive = [latest[name] for name in DEFINITIVE if name in latest]
+    if not any(row.result == "found" for row in definitive):
+        return False
+    metadata = latest.get("metadata")
+    return metadata is not None and metadata.result == "found"
 
 
 def has_retraction(db: Session, source_id: int) -> bool:
@@ -95,6 +111,8 @@ def describe_source(db: Session, source_id: int) -> tuple[str, str]:
         reported = "checked"
     else:
         reported = status
+    if automated_record_found(db, source_id):
+        detail = f"automated check. {detail}"
     if line:
         detail = f"{detail} {line}"
     if has_retraction(db, source_id):
@@ -118,6 +136,8 @@ def describe_sources(db: Session, source_ids: list[int]) -> tuple[str, str]:
         status, detail = "checked", "A lookup found a cited source. This is not a verification."
     else:
         status, detail = "not_checked", NOT_CHECKED_DETAIL
+    if any(automated_record_found(db, source_id) for source_id in source_ids):
+        detail = f"automated check. {detail}"
     line = next((provenance_line(db, source_id) for source_id in source_ids if provenance_line(db, source_id)), None)
     if line:
         detail = f"{detail} {line}"
@@ -128,6 +148,34 @@ def review_signal(db: Session, source_id: int) -> bool:
     """True when a stored check should be looked at by a person."""
     latest = _latest(source_rows(db, source_id))
     return any(row.result in {"mismatch", "retracted", "corrected", "expression_of_concern", "low_confidence", "check_failed", "not_findable"} for row in latest.values())
+
+
+def latest_quote_by_citation(db: Session, citation_ids: list[int]) -> dict[int, str]:
+    if not citation_ids:
+        return {}
+    rows = (
+        db.query(SourceCheck)
+        .filter(SourceCheck.citation_id.in_(citation_ids), SourceCheck.checker_name == "quote")
+        .order_by(SourceCheck.id)
+        .all()
+    )
+    latest: dict[int, str] = {}
+    for row in rows:
+        if row.citation_id is not None:
+            latest[row.citation_id] = row.result
+    return latest
+
+
+def llm_supports_claim(db: Session, claim_id: int) -> bool:
+    rows = (
+        db.query(SourceCheck)
+        .filter(SourceCheck.claim_id == claim_id, SourceCheck.checker_name == "llm")
+        .order_by(SourceCheck.id)
+        .all()
+    )
+    if not rows:
+        return False
+    return rows[-1].result in {"supports", "partially"}
 
 
 def latest_quote_results(db: Session, citation_ids: list[int]) -> set[str]:

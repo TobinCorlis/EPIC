@@ -18,6 +18,7 @@ from app.models.library import UpstreamInvalidation
 from app.services.factcheck.checkers import (
     courtlistener_check,
     crossref_checks,
+    crossref_record,
     federal_register_check,
     govinfo_check,
     llm_check,
@@ -60,15 +61,56 @@ def enqueue_verification(db: Session, subject_type: str, subject_id: int, user_i
     return job
 
 
+_drain_lock = threading.Lock()
+_drainer_running = False
+SYSTEM_ACTOR = "system:factcheck"
+SYSTEM_EMAIL = "system-factcheck@epic.local"
+
+
 def kickoff(job_id: int) -> None:
+    """Start one in-process drainer. The API only enqueues; this or the worker runs the checks."""
+    del job_id
     if not settings.factcheck_auto_run:
         return
-    threading.Thread(
-        target=process_verification_job,
-        args=(job_id,),
-        daemon=True,
-        name=f"epic-factcheck-{job_id}",
-    ).start()
+    global _drainer_running
+    with _drain_lock:
+        if _drainer_running:
+            return
+        _drainer_running = True
+    threading.Thread(target=_drain_queue, daemon=True, name="epic-factcheck").start()
+
+
+def _drain_queue() -> None:
+    global _drainer_running
+    from app.services.factcheck_worker import claim_next_job
+
+    try:
+        while True:
+            job_id = claim_next_job("in-process")
+            if job_id is None:
+                return
+            process_verification_job(job_id)
+    finally:
+        with _drain_lock:
+            _drainer_running = False
+
+
+def system_factcheck_user(db: Session):
+    """The actor recorded on a retraction the worker detected. It cannot sign in."""
+    from app.models.auth import User, UserRole
+
+    user = db.query(User).filter(User.email == SYSTEM_EMAIL).one_or_none()
+    if user is None:
+        user = User(
+            email=SYSTEM_EMAIL,
+            display_name=SYSTEM_ACTOR,
+            password_hash="!",
+            role=UserRole.member,
+            is_active=False,
+        )
+        db.add(user)
+        db.flush()
+    return user
 
 
 def _entered(source: Source) -> dict:
@@ -114,7 +156,7 @@ def _apply_archive(source: Source, drafts: list[dict]) -> None:
             return
 
 
-def _apply_retraction(db: Session, source: Source, drafts: list[dict], actor_id: int | None) -> None:
+def _apply_retraction(db: Session, source: Source, drafts: list[dict], actor_id: int | None, notice_meta: dict | None) -> None:
     notice = next((draft for draft in drafts if draft.get("result") == "retracted"), None)
     if notice is None:
         return
@@ -128,36 +170,36 @@ def _apply_retraction(db: Session, source: Source, drafts: list[dict], actor_id:
             UpstreamInvalidation.subject_type == "source",
             UpstreamInvalidation.subject_id == source.id,
             UpstreamInvalidation.kind == "retraction",
+            UpstreamInvalidation.reversed_reason.is_(None),
         )
         .first()
     )
-    if existing is not None or actor_id is None:
-        if actor_id is None:
-            notice["detail"] = (
-                notice.get("detail", "")
-                + " The upstream cascade was not applied because no actor was stored on the job."
-            ).strip()
+    if existing is not None:
         return
     from app.models.auth import User
     from app.services.reference_library import LibraryError, record_upstream_invalidation
 
-    user = db.get(User, actor_id)
-    role = user.role.value if user is not None and hasattr(user.role, "value") else user.role if user is not None else None
-    if user is None or role not in {"moderator", "administrator"}:
-        notice["detail"] = (
-            notice.get("detail", "")
-            + " The upstream cascade waits for a moderator."
-        ).strip()
-        return
-    notice_source = _notice_source(db, source, notice.get("response_id"))
+    actor_name = None
+    if actor_id is None:
+        user = system_factcheck_user(db)
+        actor_name = SYSTEM_ACTOR
+    else:
+        user = db.get(User, actor_id)
+        if user is None:
+            user = system_factcheck_user(db)
+            actor_name = SYSTEM_ACTOR
+    notice_source = _notice_source(db, source, notice.get("response_id"), notice_meta)
     payload = type("Payload", (), {})()
     payload.subject_type = "source"
     payload.subject_id = source.id
     payload.kind = "retraction"
-    payload.reason = notice.get("detail") or "A retraction was recorded by the automated check."
+    payload.reason = (
+        f"{notice.get('detail') or 'A retraction was recorded by the automated check.'} "
+        f"Provenance: automated check."
+    ).strip()
     payload.source_id = notice_source.id
     try:
-        record_upstream_invalidation(db, user, payload)
+        record_upstream_invalidation(db, user, payload, actor=actor_name)
     except LibraryError as exc:
         notice["detail"] = f"{notice.get('detail', '')} Cascade was not applied: {exc.detail}".strip()
 
@@ -172,17 +214,24 @@ def _claim_ids(db: Session, source_id: int) -> set[int]:
     return {row[0] for row in rows}
 
 
-def _notice_source(db: Session, source: Source, response_id: str | None) -> Source:
-    doi = response_id if response_id and response_id.startswith("10.") and response_id != extract_doi(source.url, source.document_reference) else None
-    if doi:
+def _notice_source(db: Session, source: Source, response_id: str | None, notice_meta: dict | None) -> Source:
+    from datetime import datetime
+
+    doi = response_id if response_id and str(response_id).startswith("10.") and response_id != extract_doi(source.url, source.document_reference) else None
+    meta = notice_meta or {}
+    if doi and meta.get("title"):
         url = f"https://doi.org/{doi}"
         existing = db.query(Source).filter(Source.url == url).one_or_none()
         if existing is not None:
             return existing
+        year = meta.get("year")
         notice = Source(
-            title=f"Retraction notice {doi}",
+            title=meta["title"][:500],
             url=url,
             document_reference=doi,
+            publisher=(meta.get("journal") or None),
+            author=(meta.get("author") or None),
+            publication_date=datetime(int(year), 1, 1) if year else None,
             source_type=source.source_type,
         )
     else:
@@ -191,9 +240,11 @@ def _notice_source(db: Session, source: Source, response_id: str | None) -> Sour
         if existing is not None:
             return existing
         notice = Source(
-            title=f"Retraction recorded for source {source.id}",
+            title=meta.get("title") or f"Retraction recorded for source {source.id}",
             url=None,
             document_reference=reference,
+            publisher=(meta.get("journal") or None),
+            author=(meta.get("author") or None),
             source_type=source.source_type,
         )
     db.add(notice)
@@ -201,11 +252,8 @@ def _notice_source(db: Session, source: Source, response_id: str | None) -> Sour
     return notice
 
 
-def run_source_checks(db: Session, source_id: int, transport=None, actor_id: int | None = None) -> list[SourceCheck]:
-    source = db.get(Source, source_id)
-    if source is None:
-        return []
-    client = transport or get_transport()
+def _collect_drafts(client, source: Source, excerpts: list[tuple[int, str]]) -> tuple[list[dict], dict | None]:
+    """Network only. The caller must not be holding a database write transaction."""
     entered = _entered(source)
     doi = extract_doi(source.url, source.document_reference)
     pmid = extract_pmid(source.url, source.document_reference)
@@ -215,7 +263,8 @@ def run_source_checks(db: Session, source_id: int, transport=None, actor_id: int
     if pmid:
         drafts.extend(pubmed_checks(client, pmid, entered))
     if not doi and not pmid:
-        drafts.extend(openalex_checks(client, source.title, source.author))
+        if not source.url:
+            drafts.extend(openalex_checks(client, source.title, source.author))
         document = extract_federal_register(source.url, source.document_reference)
         if document:
             drafts.append(federal_register_check(client, document))
@@ -236,14 +285,37 @@ def run_source_checks(db: Session, source_id: int, transport=None, actor_id: int
         saved = save_page_check(client, source.url)
         if saved is not None:
             drafts.append(saved)
-    citations = db.query(Citation).filter(Citation.source_id == source.id).all()
-    for citation in citations:
-        if citation.excerpt:
-            drafts.append(quote_checks(citation.excerpt, citation.id, body, content_type, http_status))
-    _apply_retraction(db, source, drafts, actor_id)
+    for citation_id, excerpt in excerpts:
+        drafts.append(quote_checks(excerpt, citation_id, body, content_type, http_status))
+    notice_meta = None
+    retraction = next((draft for draft in drafts if draft.get("result") == "retracted" and str(draft.get("response_id") or "").startswith("10.")), None)
+    if retraction is not None:
+        notice_meta = crossref_record(client, str(retraction["response_id"]))
+    return drafts, notice_meta
+
+
+def run_source_checks(db: Session, source_id: int, transport=None, actor_id: int | None = None) -> list[SourceCheck]:
+    source = db.get(Source, source_id)
+    if source is None:
+        return []
+    excerpts = [
+        (citation.id, citation.excerpt)
+        for citation in db.query(Citation).filter(Citation.source_id == source.id).all()
+        if citation.excerpt
+    ]
+    db.commit()
+    client = transport or get_transport()
+    drafts, notice_meta = _collect_drafts(client, source, excerpts)
+    source = db.get(Source, source_id)
+    if source is None:
+        return []
+    _apply_retraction(db, source, drafts, actor_id, notice_meta)
     _apply_archive(source, drafts)
     rows = _persist(db, source.id, drafts)
     _flag_claims(db, source.id)
+    from app.core.database import commit_with_retry
+
+    commit_with_retry(db)
     return rows
 
 
@@ -265,39 +337,44 @@ def run_claim_checks(db: Session, claim_id: int, transport=None, actor_id: int |
     claim = db.get(Claim, claim_id)
     if claim is None:
         return []
-    client = transport or get_transport()
-    links = (
-        db.query(ClaimEvidence)
-        .filter(ClaimEvidence.claim_id == claim_id)
-        .all()
-    )
-    rows: list[SourceCheck] = []
+    claim_body = claim.body
+    links = db.query(ClaimEvidence).filter(ClaimEvidence.claim_id == claim_id).all()
     source_ids = set()
+    urls = []
     for link in links:
         citation = db.get(Citation, link.citation_id)
         if citation is None:
             continue
         source_ids.add(citation.source_id)
+        source = db.get(Source, citation.source_id)
+        if source is not None and source.url:
+            urls.append(source.url)
+    db.commit()
+    client = transport or get_transport()
+    rows: list[SourceCheck] = []
     for source_id in source_ids:
         rows.extend(run_source_checks(db, source_id, transport=client, actor_id=actor_id))
     text = ""
-    for source_id in source_ids:
-        source = db.get(Source, source_id)
-        if source and source.url:
-            fetched, body, content_type = url_check(client, source.url)
-            extracted = extract_text(body, content_type) or ""
-            if len(extracted) > len(text):
-                text = extracted
-            _persist(db, source_id, [fetched])
-    related = openalex_related(client, claim.body, claim.id) + pubmed_related(client, claim.body, claim.id)
-    rows.extend(_persist(db, None, related))
-    model = llm_check(client, claim.body, text, claim.id)
+    for url in urls:
+        _fetched, body, content_type = url_check(client, url)
+        extracted = extract_text(body, content_type) or ""
+        if len(extracted) > len(text):
+            text = extracted
+    related = openalex_related(client, claim_body, claim_id) + pubmed_related(client, claim_body, claim_id)
+    model = llm_check(client, claim_body, text, claim_id)
+    drafts = list(related)
     if model is not None:
-        rows.extend(_persist(db, None, [model]))
-    review_claim_scope(db, claim)
-    from app.services.claim_confidence import assess_claim
+        drafts.append(model)
+    rows.extend(_persist(db, None, drafts))
+    claim = db.get(Claim, claim_id)
+    if claim is not None:
+        review_claim_scope(db, claim)
+        from app.services.claim_confidence import assess_claim
 
-    assess_claim(db, claim.id)
+        assess_claim(db, claim.id)
+    from app.core.database import commit_with_retry
+
+    commit_with_retry(db)
     return rows
 
 

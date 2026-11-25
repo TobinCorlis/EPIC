@@ -55,6 +55,7 @@ LABEL_UNSUPPORTED = "Unsupported"
 LABEL_REFUTED = "Refuted"
 LABEL_UNRATED = "Unknown – not yet rated"
 LABEL_RATED = "Rated"
+LABEL_SUPPORTED = "Supported"
 NO_RECORD = "cited source: no record found"
 SCORE_SCALE = "0–1"
 SUPPORT_RULE = "Supported or verified requires recorded supporting evidence with a reviewed tier."
@@ -74,6 +75,8 @@ class SourceRecord:
 
     @property
     def track_factor(self) -> float | None:
+        if self.retracted:
+            return 0.0
         total = self.confirmed + self.adverse
         if total == 0:
             return None
@@ -133,6 +136,7 @@ def source_record(db: Session, source_id: int) -> SourceRecord:
         .filter(
             UpstreamInvalidation.subject_type == "source",
             UpstreamInvalidation.subject_id == source_id,
+            UpstreamInvalidation.reversed_reason.is_(None),
         )
         .count()
     )
@@ -155,16 +159,20 @@ def source_has_reviewed_support(source, findability: str | None = None) -> bool:
     return bool(source.source_type_reviewed) and _record_status(source) != "no_record_found"
 
 
-def source_is_unrated(source, findability: str | None = None) -> bool:
+def source_is_unrated(source, findability: str | None = None, confirmed: bool = False) -> bool:
     """The record was found, and its tier has not been reviewed."""
     if findability == "not_findable":
         return False
+    if confirmed and not source.source_type_reviewed:
+        return True
     return _record_status(source) == "found" and not source.source_type_reviewed
 
 
-def source_has_no_record(source, findability: str | None = None) -> bool:
+def source_has_no_record(source, findability: str | None = None, confirmed: bool = False) -> bool:
     if findability == "not_findable":
         return True
+    if confirmed:
+        return False
     status = _record_status(source)
     if status == "no_record_found":
         return True
@@ -173,7 +181,9 @@ def source_has_no_record(source, findability: str | None = None) -> bool:
     return True
 
 
-def _tier(source) -> int:
+def _tier(source, confirmed: bool = False) -> int:
+    if confirmed:
+        return TIER_RANK[source.source_type]
     effective = effective_source_type(source.source_type, source.source_type_reviewed)
     return TIER_RANK[effective]
 
@@ -247,9 +257,12 @@ def assess_claim(db: Session, claim_id: int) -> dict:
         .all()
     )
     from app.services.factcheck.status import (
+        automated_record_found,
         describe_sources,
         findability_for_source,
-        latest_quote_results,
+        has_retraction,
+        latest_quote_by_citation,
+        llm_supports_claim,
         provenance_line,
         review_signal,
     )
@@ -260,17 +273,42 @@ def assess_claim(db: Session, claim_id: int) -> dict:
         link.citation.source.id: findability_for_source(db, link.citation.source.id)
         for link in supporting + contradicting
     }
-    weighed = [
-        link for link in supporting
-        if source_has_reviewed_support(link.citation.source, findability.get(link.citation.source.id))
-    ]
+    confirmed = {source_id: automated_record_found(db, source_id) for source_id in findability}
+    retracted = {source_id for source_id in findability if has_retraction(db, source_id)}
+    quote_by = latest_quote_by_citation(db, [link.citation_id for link in supporting])
+    llm_ok = llm_supports_claim(db, claim_id)
+    weighed = []
+    quote_blocked = []
+    for link in supporting:
+        source = link.citation.source
+        source_id = source.id
+        quote = quote_by.get(link.citation_id)
+        if source_id in retracted or findability.get(source_id) == "not_findable":
+            continue
+        if quote == "quote_not_found":
+            quote_blocked.append(link)
+            continue
+        quote_ok = quote == "quote_found" or (llm_ok and confirmed.get(source_id))
+        reviewed = source_has_reviewed_support(source, findability.get(source_id))
+        if reviewed or (confirmed.get(source_id) and quote_ok):
+            weighed.append(link)
     unrated = [
         link for link in supporting
-        if source_is_unrated(link.citation.source, findability.get(link.citation.source.id))
+        if source_is_unrated(
+            link.citation.source,
+            findability.get(link.citation.source.id),
+            confirmed.get(link.citation.source.id, False),
+        )
+        and link not in weighed
+        and link not in quote_blocked
     ]
     missing = [
         link for link in supporting
-        if source_has_no_record(link.citation.source, findability.get(link.citation.source.id))
+        if source_has_no_record(
+            link.citation.source,
+            findability.get(link.citation.source.id),
+            confirmed.get(link.citation.source.id, False),
+        )
     ]
     missing_note = NO_RECORD if missing else None
 
@@ -317,12 +355,33 @@ def assess_claim(db: Session, claim_id: int) -> dict:
             contradicting=[_source_brief(link) for link in stronger],
         )
     elif weighed:
-        quote_results = latest_quote_results(db, [link.citation_id for link in weighed])
-        breakdown = _rated_breakdown(db, weighed, contradicting, missing_note, "quote_not_found" in quote_results)
-        if quote_results & {"quote_not_found", "text_not_accessible"}:
-            claim = db.get(Claim, claim_id)
-            if claim is not None:
-                claim.needs_review = True
+        automated_support = any(
+            confirmed.get(link.citation.source.id)
+            and (quote_by.get(link.citation_id) == "quote_found" or llm_ok)
+            for link in weighed
+        )
+        breakdown = _rated_breakdown(
+            db,
+            weighed,
+            contradicting,
+            missing_note,
+            label=LABEL_SUPPORTED if automated_support else LABEL_RATED,
+            confirmed=confirmed,
+        )
+    elif quote_blocked:
+        breakdown = _assessment(
+            None,
+            LABEL_UNRATED,
+            [
+                _factor("tier", None, "The cited record was found, but the quoted text was not in the accessible text. This stays below Supported and is flagged for review."),
+                _factor("track_record", None, "Not applied until the quoted support is established."),
+                _factor("independent_corroboration", None, "A quote that was not found does not corroborate the claim."),
+                _factor("counterevidence", None, "Not applied."),
+            ],
+        )
+        claim = db.get(Claim, claim_id)
+        if claim is not None:
+            claim.needs_review = True
     elif unrated and not missing:
         titles = ", ".join(f"'{link.citation.source.title}'" for link in unrated)
         breakdown = _assessment(
@@ -376,16 +435,27 @@ def _rated_breakdown(
     contradicting: list[ClaimEvidence],
     missing_note: str | None,
     quote_missing: bool = False,
+    label: str = LABEL_RATED,
+    confirmed: dict | None = None,
 ) -> dict:
-    best = max(weighed, key=lambda link: _tier(link.citation.source))
+    confirmed = confirmed or {}
+    best = max(weighed, key=lambda link: _tier(link.citation.source, confirmed.get(link.citation.source.id, False)))
     best_source = best.citation.source
-    best_tier = _tier(best_source)
+    best_confirmed = bool(confirmed.get(best_source.id))
+    best_tier = _tier(best_source, best_confirmed)
     tier_factor = best_tier / 8
-    tier_detail = (
-        f"Strongest supporting source is '{best_source.title}' "
-        f"with reviewed tier rank {best_tier} of 8. "
-        "Unreviewed declared types are not given their declared rank. Tiers are not added across items."
-    )
+    if best_confirmed and not best_source.source_type_reviewed:
+        tier_detail = (
+            f"Strongest supporting source is '{best_source.title}' "
+            f"with declared tier rank {best_tier} of 8 after an automated check matched the identifier and metadata. "
+            "Tiers are not added across items."
+        )
+    else:
+        tier_detail = (
+            f"Strongest supporting source is '{best_source.title}' "
+            f"with reviewed tier rank {best_tier} of 8. "
+            "Unreviewed declared types are not given their declared rank. Tiers are not added across items."
+        )
     record = source_record(db, best_source.id)
     if record.track_factor is None:
         track_detail = (
@@ -420,7 +490,7 @@ def _rated_breakdown(
         )
     return _assessment(
         round(score, 2),
-        LABEL_RATED,
+        label,
         [
             _factor("tier", tier_factor, tier_detail),
             _factor("track_record", record.track_factor, track_detail),

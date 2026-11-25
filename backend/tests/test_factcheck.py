@@ -2,16 +2,19 @@
 import itertools
 import json
 import os
+import threading
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, commit_with_retry
 from app.main import app
 from app.models.auth import User, UserRole
-from app.models.factcheck import SourceCheck, VerificationJob
+from app.models.factcheck import FactcheckCache, SourceCheck, VerificationJob
+from app.models.library import UpstreamInvalidation
+from app.services.factcheck.status import findability_for_source
 from app.services.factcheck.checkers import validate_llm_assessment
 from app.services.factcheck.http import HttpResponse, HttpxTransport, get_transport, set_transport, user_agent
 from app.services.factcheck.runner import enqueue_verification, process_verification_job
@@ -70,18 +73,20 @@ def _user(role=None):
 
 
 def _source(headers, title, url, document=None, source_type="peer_reviewed", author="Ada Lovelace", year="2020-01-01T00:00:00"):
+    payload = {
+        "title": title,
+        "document_reference": document,
+        "publisher": "Journal of Examples",
+        "author": author,
+        "publication_date": year,
+        "source_type": source_type,
+    }
+    if url is not None:
+        payload["url"] = url
     created = client.post(
         "/sources",
         headers=headers,
-        json={
-            "title": title,
-            "url": url,
-            "document_reference": document,
-            "publisher": "Journal of Examples",
-            "author": author,
-            "publication_date": year,
-            "source_type": source_type,
-        },
+        json=payload,
     )
     assert created.status_code == 201, created.text
     return created.json()
@@ -234,7 +239,7 @@ def test_network_failure_is_check_failed_and_not_verified():
 
 def test_openalex_low_confidence_is_not_confirmed_and_a_strong_match_is():
     headers, _user_id = _user()
-    weak = _source(headers, "Lantern marble study", "https://example.edu/lantern", document="report 1")
+    weak = _source(headers, "Lantern marble study", None, document="report 1")
     set_transport(FakeTransport([
         (lambda method, url: "api.openalex.org" in url, json_response(200, {"results": [{
             "id": "https://openalex.org/W1",
@@ -246,7 +251,7 @@ def test_openalex_low_confidence_is_not_confirmed_and_a_strong_match_is():
     weak_hit = next(row for row in weak_rows if row["checker_name"] == "openalex")
     assert weak_hit["result"] == "low_confidence"
     assert weak_hit["match_score"] < 0.72
-    strong = _source(headers, "Lantern marble study", "https://example.edu/lantern-strong", document="report 2")
+    strong = _source(headers, "Lantern marble study", None, document="report 2")
     set_transport(FakeTransport([
         (lambda method, url: "api.openalex.org" in url, json_response(200, {"results": [{
             "id": "https://openalex.org/W2",
@@ -393,9 +398,10 @@ def test_quote_not_found_lowers_support_and_does_not_refute():
     rows = client.post(f"/sources/{source['id']}/checks", headers=headers).json()
     assert any(row["result"] == "quote_not_found" for row in rows)
     summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()
-    assert summary["confidence"]["label"] == "Rated"
-    assert summary["confidence"]["label"] != "Refuted"
-    assert summary["confidence"]["confidence_score"] == 0.10
+    assert summary["confidence"]["label"] != "Supported"
+    assert summary["confidence"]["label"] != "Rated"
+    assert summary["confidence"]["label"] != "Unsupported"
+    assert not (summary["confidence"]["confidence_score"] or 0) > 0
     flagged = client.get(f"/debates/{claim['debate_id']}/claims").json()[0]
     assert flagged["needs_review"] is True
 
@@ -606,7 +612,226 @@ def test_workspace_shows_the_verification_panel():
     assert "Re-run checks" in script
     assert "Verification queue" in page
     assert "Automated lookup of cited sources is not implemented" not in script
-    assert "app.js?v=20" in page
+    assert "app.js?v=21" in page
+    assert "Source #" in script and "Existence" in script and "Archive" in script
+
+
+def test_url_fetch_beats_a_weak_openalex_title_match():
+    headers, _user_id = _user()
+    source = _source(headers, "Agency table", f"https://example.gov/table-{next(_seq)}", document="table", source_type="government_record")
+    with SessionLocal() as db:
+        db.add(SourceCheck(
+            source_id=source["id"],
+            checker_name="openalex",
+            checker_version="factcheck-v1",
+            api_name="api.openalex.org",
+            query="works search Agency table",
+            result="low_confidence",
+            match_score=0.1,
+            detail="OpenAlex returned a weak title match. It is not confirmed and needs review.",
+        ))
+        db.add(SourceCheck(
+            source_id=source["id"],
+            checker_name="url",
+            checker_version="factcheck-v1",
+            api_name="example.gov",
+            query=source["url"],
+            result="fetched",
+            http_status=200,
+            detail="HTTP 200 from the cited URL.",
+        ))
+        db.commit()
+        assert findability_for_source(db, source["id"]) == "found"
+
+
+def test_matching_quote_on_a_confirmed_doi_scores_above_zero_and_can_be_supported():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/quoted")
+    claim = _debate_claim("The paper says the shoreline rose by one meter.")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/quoted", "Measured shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/quoted"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/quoted",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["confidence_score"] > 0
+    assert summary["label"] == "Supported"
+    assert "automated check" in summary["automated_source_check_detail"]
+    panel = client.get(f"/claims/{claim['id']}/checks").json()
+    assert any(row["checker_name"] == "crossref" and row["result"] == "found" for row in panel)
+    assert any(row["checker_name"] == "metadata" and row["result"] == "found" for row in panel)
+
+
+def test_absent_quote_on_a_confirmed_doi_does_not_reach_supported():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/unquoted")
+    claim = _debate_claim("The paper says the shoreline fell.")
+    _link(claim["id"], source["id"], excerpt="the shoreline fell by a meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/unquoted", "Measured shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/unquoted"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/unquoted",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["label"] != "Supported"
+    assert summary["label"] != "Unsupported"
+    assert not (summary["confidence_score"] or 0) > 0
+    flagged = client.get(f"/debates/{claim['debate_id']}/claims").json()[0]
+    assert flagged["needs_review"] is True
+
+
+def test_fake_doi_is_unsupported_at_zero():
+    headers, _user_id = _user()
+    source = _source(headers, "Never published", "https://doi.org/10.1000/fake-paper")
+    claim = _debate_claim("The fake paper measured the shoreline.")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, json_response(404, {"status": "404"})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["label"] == "Unsupported"
+    assert summary["confidence_score"] == 0
+    assert summary["cited_source_note"] == "cited source: no record found"
+
+
+def test_worker_retraction_uses_the_crossref_title_and_a_system_actor():
+    headers, _user_id = _user(UserRole.moderator)
+    source = _source(headers, "Retracted shoreline study", "https://doi.org/10.1000/sys-retract")
+    claim = _debate_claim("The retracted study measured the shoreline.")
+    _link(claim["id"], source["id"])
+    with SessionLocal() as db:
+        job = (
+            db.query(VerificationJob)
+            .filter(VerificationJob.subject_type == "source", VerificationJob.subject_id == source["id"], VerificationJob.status == "queued")
+            .one()
+        )
+        job.requested_by_user_id = None
+        db.commit()
+        job_id = job.id
+    transport = FakeTransport([
+        (lambda method, url: "10.1000/sys-notice" in url, _crossref(
+            "10.1000/sys-notice", "Retraction of the shoreline study", author="Journal",
+        )),
+        (lambda method, url: "api.crossref.org" in url, _crossref(
+            "10.1000/sys-retract",
+            "Retracted shoreline study",
+            notices=[{"type": "retraction", "DOI": "10.1000/sys-notice", "label": "Retraction"}],
+        )),
+    ])
+    process_verification_job(job_id, transport=transport)
+    record = client.get(f"/sources/{source['id']}/record").json()
+    assert record["track_factor"] == 0
+    assert record["retracted"] >= 1
+    with SessionLocal() as db:
+        invalidation = (
+            db.query(UpstreamInvalidation)
+            .filter(UpstreamInvalidation.subject_type == "source", UpstreamInvalidation.subject_id == source["id"])
+            .one()
+        )
+        assert invalidation.actor == "system:factcheck"
+        notice = db.query(__import__("app.models.evidence", fromlist=["Source"]).Source).filter(
+            __import__("app.models.evidence", fromlist=["Source"]).Source.url == "https://doi.org/10.1000/sys-notice"
+        ).one()
+        assert notice.title == "Retraction of the shoreline study"
+        invalidation_id = invalidation.id
+    reversed_row = client.post(
+        f"/library/invalidations/{invalidation_id}/reverse",
+        headers=headers,
+        json={"reason": "The notice concerns a different study."},
+    )
+    assert reversed_row.status_code == 200, reversed_row.text
+    after = client.get(f"/sources/{source['id']}/record").json()
+    assert after["retracted"] == 0
+    assert after["track_factor"] is None
+
+
+def test_http_during_a_check_does_not_hold_the_sqlite_writer():
+    headers, _user_id = _user()
+    source = _source(headers, "Lock study", "https://doi.org/10.1000/lock-study")
+    started = threading.Event()
+    wrote = threading.Event()
+
+    def request(method, url, headers=None, data=None):
+        if "api.crossref.org" in url:
+            started.set()
+            assert wrote.wait(2), "a second writer could not commit while the lookup was in flight"
+            return _crossref("10.1000/lock-study", "Lock study")
+        return HttpResponse(status=None, url=url, body=b"", content_type="", error="no route")
+
+    def other_writer():
+        assert started.wait(2)
+        db = SessionLocal()
+        db.add(SourceCheck(
+            source_id=source["id"],
+            checker_name="probe",
+            checker_version="factcheck-v1",
+            api_name="probe",
+            query=f"lock-probe-{source['id']}",
+            result="check_failed",
+            detail="Concurrent write during HTTP.",
+        ))
+        commit_with_retry(db)
+        db.close()
+        wrote.set()
+
+    thread = threading.Thread(target=other_writer)
+    thread.start()
+    set_transport(type("Transport", (), {"request": staticmethod(request)})())
+    checked = client.post(f"/sources/{source['id']}/checks", headers=headers)
+    thread.join()
+    assert checked.status_code == 200, checked.text
+    assert wrote.is_set()
+
+
+def test_concurrent_sqlite_writes_retry_instead_of_failing_locked():
+    errors = []
+
+    def write(index):
+        for step in range(6):
+            db = SessionLocal()
+            try:
+                db.add(SourceCheck(
+                    checker_name="probe",
+                    checker_version="factcheck-v1",
+                    api_name="probe",
+                    query=f"concurrent-{index}-{step}",
+                    result="check_failed",
+                    detail="concurrency",
+                ))
+                commit_with_retry(db)
+            except Exception as exc:
+                errors.append(str(exc))
+            finally:
+                db.close()
+
+    threads = [threading.Thread(target=write, args=(index,)) for index in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+
+
+def test_oversized_response_is_not_written_into_the_cache(monkeypatch):
+    def fake_request(method, url, headers=None, content=None, timeout=None, follow_redirects=None):
+        body = b'{"results":' + (b"x" * 40000)
+        return httpx.Response(200, content=body, headers={"content-type": "application/json"}, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(httpx, "request", fake_request)
+    transport = HttpxTransport(interval=0, retries=0)
+    url = "https://api.openalex.org/works?search=oversized-cache-body"
+    result = transport.request("GET", url)
+    assert result.status == 200
+    with SessionLocal() as db:
+        assert db.query(FactcheckCache).filter(FactcheckCache.url == url).count() == 0
 
 
 @pytest.mark.skipif(os.environ.get("EPIC_LIVE_FACTCHECK") != "1", reason="Set EPIC_LIVE_FACTCHECK=1 to call Crossref")

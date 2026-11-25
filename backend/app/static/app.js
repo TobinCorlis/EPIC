@@ -579,6 +579,30 @@ function showProduct(which) {
   else loadFactcheckQueue();
 }
 
+function latestCheck(rows, names) {
+  const matches = rows.filter(check => names.includes(check.checker_name));
+  return matches.length ? matches[matches.length - 1] : null;
+}
+
+function sourceCheckSummary(checks) {
+  const grouped = new Map();
+  for (const check of checks || []) {
+    if (!check.source_id) continue;
+    if (!grouped.has(check.source_id)) grouped.set(check.source_id, []);
+    grouped.get(check.source_id).push(check);
+  }
+  if (!grouped.size) return '';
+  return [...grouped.entries()].map(([sourceId, rows]) => {
+    const existence = latestCheck(rows, ['crossref', 'pubmed', 'openalex', 'federal_register', 'govinfo', 'courtlistener']);
+    const metadata = latestCheck(rows, ['metadata']);
+    const retraction = latestCheck(rows, ['retraction', 'notice']);
+    const url = latestCheck(rows, ['url']);
+    const archive = latestCheck(rows, ['wayback', 'save_page_now']);
+    const line = (label, check) => `<li><b>${label}:</b> ${check ? `${esc(check.result)}${check.http_status ? ` · HTTP ${esc(check.http_status)}` : ''}${check.evidence_url ? ` · <a href="${esc(check.evidence_url)}">Record</a>` : ''}${check.archive_url ? ` · <a href="${esc(check.archive_url)}">Archive snapshot</a>` : ''}` : 'not recorded'}</li>`;
+    return `<div><p><b>Source #${esc(sourceId)} checks</b></p><ul>${line('Existence', existence)}${line('Metadata', metadata)}${line('Retraction', retraction)}${line('URL', url)}${line('Archive', archive)}</ul></div>`;
+  }).join('');
+}
+
 function verificationPanel(checks, claimId) {
   const rows = checks || [];
   const items = rows.length
@@ -590,7 +614,7 @@ function verificationPanel(checks, claimId) {
     }).join('')
     : '<li>No automated check has been recorded.</li>';
   const button = claimId ? `<button type="button" data-rerun-claim="${claimId}">Re-run checks</button>` : '';
-  return `<div class="verification"><p><b>Verification</b></p><ul>${items}</ul>${button}</div>`;
+  return `<div class="verification"><p><b>Verification</b></p>${sourceCheckSummary(rows)}<ul>${items}</ul>${button}</div>`;
 }
 
 async function loadFactcheckQueue() {

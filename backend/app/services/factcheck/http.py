@@ -15,12 +15,15 @@ from urllib.parse import urlparse
 
 import httpx
 
+from sqlalchemy.exc import OperationalError
+
 from app.core.clock import utcnow
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core.database import SessionLocal, commit_with_retry
 from app.models.factcheck import FactcheckCache
 
 CHECKER_VERSION = "factcheck-v1"
+CACHE_MAX_CHARS = 32000
 
 
 @dataclass
@@ -123,10 +126,15 @@ class HttpxTransport:
                 body=row.body.encode(),
                 content_type=row.content_type or "",
             )
+        except OperationalError:
+            return None
         finally:
             db.close()
 
     def _write_cache(self, url: str, result: HttpResponse) -> None:
+        text = result.body.decode("utf-8", errors="replace")
+        if len(text) > CACHE_MAX_CHARS:
+            return
         db = SessionLocal()
         try:
             key = _cache_key(url)
@@ -138,10 +146,12 @@ class HttpxTransport:
             row.http_status = result.status
             row.final_url = result.url
             row.content_type = result.content_type
-            row.body = result.body.decode("utf-8", errors="replace")[:400_000]
+            row.body = text
             row.fetched_at = utcnow()
             row.expires_at = utcnow() + timedelta(hours=settings.factcheck_cache_hours)
-            db.commit()
+            commit_with_retry(db)
+        except OperationalError:
+            db.rollback()
         finally:
             db.close()
 

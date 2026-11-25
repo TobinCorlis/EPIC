@@ -853,7 +853,7 @@ def resolve_point(db: Session, point: LibraryPoint, user_id: int, payload) -> Re
     return version
 
 
-def record_upstream_invalidation(db: Session, user, payload) -> UpstreamInvalidation:
+def record_upstream_invalidation(db: Session, user, payload, actor: str | None = None) -> UpstreamInvalidation:
     from app.services.verification_history import record_verification_mistake
 
     notice = db.get(Source, payload.source_id)
@@ -877,6 +877,7 @@ def record_upstream_invalidation(db: Session, user, payload) -> UpstreamInvalida
         reason=payload.reason.strip(),
         source_id=payload.source_id,
         recorded_by_user_id=user.id,
+        actor=actor or getattr(user, "display_name", None),
     )
     db.add(invalidation)
     db.flush()
@@ -953,6 +954,34 @@ def record_upstream_invalidation(db: Session, user, payload) -> UpstreamInvalida
             requested_by_user_id=user.id,
             status="open",
         ))
+    return invalidation
+
+
+def reverse_upstream_invalidation(db: Session, invalidation: UpstreamInvalidation, user, reason: str) -> UpstreamInvalidation:
+    """Record a moderator reversal. It does not restore a verified status."""
+    if invalidation.reversed_reason:
+        raise LibraryError(409, "This invalidation was already reversed.")
+    invalidation.reversed_reason = reason.strip()
+    invalidation.reversed_by_user_id = user.id
+    invalidation.reversed_at = utcnow()
+    claim_ids = set()
+    if invalidation.subject_type == "source":
+        claim_ids.update(_claims_supported_by_source(db, invalidation.subject_id))
+    for claim_id in claim_ids:
+        claim = db.get(Claim, claim_id)
+        if claim is None:
+            continue
+        db.add(ClaimCorrection(
+            claim_id=claim.id,
+            original_body=claim.body,
+            corrected_body=claim.body,
+            reason=f"Invalidation {invalidation.id} reversed: {reason.strip()}",
+            kind="upstream_invalidation",
+            author_user_id=user.id,
+        ))
+        from app.services.claim_confidence import assess_claim
+
+        assess_claim(db, claim.id)
     return invalidation
 
 

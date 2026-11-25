@@ -11,7 +11,7 @@ import argparse
 import socket
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.clock import utcnow
 from app.core.config import settings
@@ -35,10 +35,17 @@ def claim_next_job(worker_id: str) -> int | None:
         job = db.execute(statement).scalar_one_or_none()
         if job is None:
             return None
-        job.status = "running"
-        job.worker_id = worker_id
-        job.claimed_at = utcnow()
-        db.commit()
+        claimed = db.execute(
+            update(VerificationJob)
+            .where(VerificationJob.id == job.id, VerificationJob.status == "queued")
+            .values(status="running", worker_id=worker_id, claimed_at=utcnow())
+        )
+        if claimed.rowcount != 1:
+            db.rollback()
+            return None
+        from app.core.database import commit_with_retry
+
+        commit_with_retry(db)
         return job.id
     finally:
         db.close()

@@ -100,6 +100,25 @@ def metadata_result(entered: dict, recorded: dict) -> tuple[str, str]:
     return "found", "Title, authors, year, and journal match the fields that were entered."
 
 
+def crossref_record(transport, doi: str) -> dict | None:
+    """Title, authors, year, and journal from Crossref. None when the work is not returned."""
+    url = f"https://api.crossref.org/works/{quote(doi, safe='/')}"
+    response = transport.request("GET", url)
+    payload = _loads(response)
+    message = (payload or {}).get("message") if isinstance(payload, dict) else None
+    if response.status != 200 or not isinstance(message, dict):
+        return None
+    issued = ((message.get("issued") or {}).get("date-parts") or [[None]])[0]
+    year = issued[0] if issued else None
+    return {
+        "title": " ".join(message.get("title") or []).strip(),
+        "author": _people(message.get("author")),
+        "year": year,
+        "journal": " ".join(message.get("container-title") or []).strip(),
+        "doi": str(message.get("DOI") or doi),
+    }
+
+
 def crossref_checks(transport, doi: str, entered: dict) -> list[dict]:
     query = f"works/{doi}"
     url = f"https://api.crossref.org/works/{quote(doi, safe='/')}"

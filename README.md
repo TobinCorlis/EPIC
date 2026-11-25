@@ -81,14 +81,15 @@ Claim confidence is a 0–1 score with a label. It is not a verification. Automa
 
 The rules, in order, are:
 
-- No supporting evidence, or a cited source with no findable record, scores 0 and is labeled Unsupported. The missing citation is stored as `cited source: no record found`.
+- No supporting evidence, or a cited source with no findable record, scores 0 and is labeled Unsupported. The missing citation is stored as `cited source: no record found`. A passing automated existence check — the identifier resolved, the entered metadata matches, and the work is not retracted — satisfies that record-found gate. Its provenance is `automated check`. A fetched URL with HTTP 200 counts as found for that URL. A weak OpenAlex title match does not override it, and OpenAlex title search runs only when the source has no DOI, PMID, or URL.
 - A claim contradicted by stronger, independent, reviewed evidence scores 0 and is labeled Refuted. The contradicting sources are listed. A weaker or non-independent source does not force that label.
-- Supported and Verified require recorded supporting evidence whose tier a person has reviewed. Otherwise the status is blocked or downgraded and the claim or library entry is flagged for review. `verified` still requires a recorded verification event by a named person, with the method and the archive URL or snapshot that was checked.
-- `Unknown – not yet rated` is used only when a person has found the record and the tier has not been reviewed. It is not used for a missing or fabricated citation.
+- Supported requires the claim's support to be established: a quote found in the fetched text, or a model span verified to be in that text, from a found non-retracted source of adequate tier, or reviewed linked evidence. A found source whose quoted text is not in the accessible text stays below Supported and is flagged. It is not labeled Unsupported. `verified` still requires a moderator and a recorded verification event, with the method and the archive URL or snapshot that was checked. Automated checks count as real checks for scoring. They do not by themselves mark a source verified.
+- A retraction sets that source's track factor to 0 and records an upstream invalidation. The worker records the actor as `system:factcheck`. A moderator can reverse that invalidation with a reason. The reversal does not restore verified.
+- `Unknown – not yet rated` is used when the record was found and the tier has not been reviewed, and support has not been established by a matching quote. It is not used for a missing or fabricated citation.
 - Otherwise the stored formula is `tier_factor * track_factor * corroboration_factor * counter_factor`. Factors are rounded to two decimals.
 
 - `tier_factor` is the strongest supporting source's reviewed tier rank divided by 8. An unreviewed declared type contributes as unknown, not as the declared tier. Tiers are not summed.
-- `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero.
+- `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero. A recorded retraction that has not been reversed makes the factor 0.
 - `corroboration_factor` is the number of independent supporting sources, capped at 3, divided by 3.
 - `counter_factor` is 1 divided by 1 plus the number of independent contradicting sources whose challenge was not upheld. Upheld challenges refute that contrary evidence and it is reported, then excluded. Nothing outside the database is invented.
 
@@ -108,7 +109,7 @@ What is checked:
 
 - A DOI is looked up at Crossref. Title, authors, year, and journal are compared with the fields that were entered. A mismatch is flagged. The work is still recorded as found.
 - A PMID is looked up in PubMed. The same metadata comparison applies. Retraction, erratum, and expression-of-concern publication types are recorded.
-- A source with no DOI or PMID is searched in OpenAlex by title and author. A match score under 0.72 is `low_confidence`. It is not auto-confirmed.
+- OpenAlex title search runs only when the source has no DOI, no PMID, and no URL. A match score under 0.72 is `low_confidence` and does not override a URL that returned HTTP 200.
 - Crossref `update-to` and relation data, including Retraction Watch relations, record a retraction, correction, or expression of concern. A retraction starts the upstream invalidation cascade when a moderator is the actor, and that updates the source track record. The same cascade is not run twice for one source.
 - A URL is fetched. The row stores HTTP status, final URL, content type, retrieval time, and a content hash. The Internet Archive availability API is queried. `archived` is recorded only when a snapshot URL and timestamp come back, and only then are `archive_url` and `archived_at` set. Save Page Now runs only when `FACTCHECK_SAVE_PAGE_NOW` is true, and only a successful capture is stored.
 - Federal Register, govinfo, and CourtListener adapters run when their identifier is present. govinfo uses `GOVINFO_API_KEY` when set. CourtListener uses `COURTLISTENER_API_TOKEN` when set. A 401 or 403 is `check_failed`, not a missing record.
