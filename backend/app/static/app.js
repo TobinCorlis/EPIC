@@ -73,6 +73,9 @@ function written(map, value) {
 
 function confidenceBlock(confidence) {
   if (!confidence) return '<p><b>Confidence:</b> Unknown – not yet rated</p>';
+  if (confidence.not_factually_answerable) {
+    return `<p><b>Not factually answerable.</b> This question has no factual answer. ${esc(confidence.answerability_reason || '')}</p>`;
+  }
   const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Rated');
   const factors = (confidence.factors || []).map(factor =>
     `<li><b>${esc(factor.name)}</b>: ${esc(formatFactor(factor.value))}. ${esc(factor.detail || '')}</li>`
@@ -193,6 +196,8 @@ async function createDebate() {
       title: $('debateTitle').value,
       fixed_question: $('question').value,
       description: $('description').value || null,
+      answerability: $('debateAnswerability').value,
+      answerability_reason: $('debateAnswerabilityReason').value || null,
       question_population: $('questionPopulation').value || null,
       question_timeframe: $('questionTimeframe').value || null,
       question_geography: $('questionGeography').value || null,
@@ -347,6 +352,11 @@ async function renderLibraryAttachment() {
   banner.hidden = true;
   answer.innerHTML = '';
   currentLibraryEntry = null;
+  if (currentDebate && currentDebate.answerability === 'not_factually_answerable') {
+    banner.hidden = false;
+    banner.innerHTML = `<p><b>Not factually answerable.</b> This question has no factual answer. ${esc(currentDebate.answerability_reason || '')} It is not reused from the factual reference library.</p>`;
+    return;
+  }
   if (!currentDebate || !currentDebate.library_entry_id) {
     if (currentDebate && currentDebate.library_notice) {
       banner.hidden = false;
@@ -377,6 +387,8 @@ async function addClaim() {
       scope_timeframe: $('claimTimeframe').value || null,
       scope_geography: $('claimGeography').value || null,
       scope_metric: $('claimMetric').value || null,
+      answerability: $('claimAnswerability').value,
+      answerability_reason: $('claimAnswerabilityReason').value || null,
     })});
     ['claimBody', 'claimUncertainty', 'claimPopulation', 'claimTimeframe', 'claimGeography', 'claimMetric'].forEach(id => { $(id).value = ''; });
     msg('claimMsg', (claim.needs_review ? 'Claim added and flagged for review.' : 'Claim added.') + (claim.library_notice ? ' ' + claim.library_notice : ''), !claim.needs_review);
@@ -553,7 +565,62 @@ function connectRoom() {
   socket.onclose = () => { if (currentDebate) setTimeout(connectRoom, 2000); };
 }
 
+function showProduct(which) {
+  const factual = which !== 'fable';
+  $('home').hidden = !factual;
+  if ($('workspace')) $('workspace').hidden = true;
+  $('fablePanel').hidden = factual;
+  $('tabFactual').setAttribute('aria-selected', factual ? 'true' : 'false');
+  $('tabFable').setAttribute('aria-selected', factual ? 'false' : 'true');
+  if (!factual) loadFables();
+}
+
+async function createFable() {
+  try {
+    const names = $('fableCharacters').value.split(',').map(name => name.trim()).filter(Boolean);
+    const created = await api('/fable/matchups', {method: 'POST', body: JSON.stringify({title: $('fableTitle').value, question: $('fableQuestion').value, mode: $('fableMode').value, personal_knowledge_only: true, participants: names})});
+    msg('fableMsg', 'Matchup created. This is fiction, not evidence.', true);
+    await openFable(created.id);
+  } catch (error) { msg('fableMsg', error.message); }
+}
+
+async function loadFables() {
+  try {
+    const rows = await api('/fable/matchups');
+    $('fableList').innerHTML = rows.length ? rows.map(row => `<article class="item"><b>${esc(row.title)}</b><div>${row.mode === 'debate' ? 'Debate (personal knowledge)' : 'AI matchup'} · fiction</div><button type="button" data-open-fable="${row.id}">Open matchup</button></article>`).join('') : '<p class="muted">No fictional matchups yet.</p>';
+  } catch (error) { $('fableList').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
+}
+
+function fableDetail(row) {
+  const lore = row.lore.map(item => `<li>#${item.id} ${esc(item.work_title)}, ${esc(item.installment)}, ${esc(item.pinpoint)} · ${esc(item.canon_status)}. ${esc(item.body)}</li>`).join('') || '<li>No lore yet.</li>';
+  const steps = row.steps.map(step => `<li>Step ${step.step_number} (lore ${esc(step.lore_item_ids.join(', '))}): ${esc(step.body)}</li>`).join('') || '<li>No reasoning steps yet.</li>';
+  const notes = row.canon_notes.map(note => `<li>${esc(note.kind)}: ${esc(note.note)}</li>`).join('') || '<li>None.</li>';
+  const moves = row.moves.map(move => `<li>Move #${move.id}: ${esc(move.move_text)} · ${esc(move.claimed_source)} · ${esc(move.ruling || 'not ruled')}</li>`).join('') || '<li>No moves yet.</li>';
+  const debate = row.mode === 'debate' ? `<h3>Moves</h3><p>There is no control to ask the AI for help. The debater supplies the feat and the citation.</p><ul>${moves}</ul><select id="fableParticipant">${row.participants.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select><textarea id="fableMove" placeholder="Power or feat the debater claims"></textarea><input id="fableCitation" placeholder="Canon citation supplied by the debater"><button type="button" onclick="addFableMove(${row.id})">Record move</button><h3>Moderator ruling</h3><p>${esc(row.referee_scope)}</p><input id="fableMoveId" placeholder="Move id"><select id="fableRuling"><option value="allowed">Allowed</option><option value="disallowed">Disallowed</option><option value="unverified">Unverified</option></select><textarea id="fableRulingReason" placeholder="Reason for this move only"></textarea><input id="fableRulingCitation" placeholder="Citation"><button type="button" onclick="ruleFableMove()">Record moderator ruling</button><h3>Debate outcome</h3><p>Label: debate. This does not write the AI matchup outcome.</p><input id="fableDebateOutcome" placeholder="Outcome, or undetermined by canon"><textarea id="fableDebateNote" placeholder="Based only on the moves made"></textarea><input id="fableOutcomeMoves" placeholder="Ruled move ids, comma separated"><button type="button" onclick="saveDebateOutcome(${row.id})">Save debate outcome</button><p><button type="button" class="secondary" onclick="runFableReferee(${row.id})">Automated AI referee</button> Automated AI refereeing is not implemented.</p>` : `<ul>${moves}</ul><p><button type="button" class="secondary" onclick="runFableMatchup(${row.id})">Run AI matchup</button> An AI matchup run is not implemented.</p>`;
+  return `<article class="claim"><p><b>Fiction.</b> ${esc(row.cheating_notice)}</p><h3>${esc(row.title)}</h3><p>${esc(row.question)}</p><p>AI matchup outcome (${esc(row.ai_outcome_label)}): ${esc(row.ai_outcome || 'none')}</p><p>Debate outcome (${esc(row.debate_outcome_label)}): ${esc(row.debate_outcome || 'none')}</p><p>Automated analysis: ${esc(row.automated_analysis)}. Automated referee: ${esc(row.automated_referee)}.</p><h3>Lore</h3><ul>${lore}</ul><input id="loreWork" placeholder="Work title"><input id="loreInstallment" placeholder="Issue, episode, or film"><input id="lorePin" placeholder="Page or timestamp"><select id="loreCanon"><option value="primary_canon">Primary canon</option><option value="secondary">Secondary</option><option value="non_canon">Non-canon</option></select><textarea id="loreBody" placeholder="What the cited lore says"></textarea><button type="button" onclick="addFableLore(${row.id})">Add lore</button><h3>Reasoning</h3><ul>${steps}</ul><input id="stepNumber" type="number" min="1" value="1"><textarea id="stepBody" placeholder="Reasoning using only cited lore"></textarea><input id="stepLore" placeholder="Lore item ids"><button type="button" onclick="addFableStep(${row.id})">Add step</button><h3>Canon notes</h3><ul>${notes}</ul><select id="canonKind"><option value="silent">Canon is silent</option><option value="contradicts">Canon contradicts itself</option></select><textarea id="canonNote" placeholder="Note"></textarea><button type="button" onclick="addFableNote(${row.id})">Add canon note</button>${debate}<p id="fableDetailMsg" class="notice"></p></article>`;
+}
+
+async function openFable(id) {
+  const row = await api('/fable/matchups/' + id);
+  $('fableDetail').innerHTML = fableDetail(row);
+  await loadFables();
+}
+async function loadFables() {
+  const rows = await api('/fable/matchups');
+  $('fableList').innerHTML = rows.length ? rows.map(row => `<article class="item"><b>${esc(row.title)}</b><div>${row.mode === 'debate' ? 'Debate (personal knowledge)' : 'AI matchup'} · fiction</div><button type="button" data-open-fable="${row.id}">Open matchup</button></article>`).join('') : '<p class="muted">No fictional matchups yet.</p>';
+}
+async function addFableLore(id) { try { await api(`/fable/matchups/${id}/lore`, {method:'POST', body: JSON.stringify({work_title:$('loreWork').value, installment:$('loreInstallment').value, pinpoint:$('lorePin').value, canon_status:$('loreCanon').value, body:$('loreBody').value})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function addFableStep(id) { try { const lore = $('stepLore').value.split(',').map(value => Number(value.trim())).filter(Boolean); await api(`/fable/matchups/${id}/steps`, {method:'POST', body: JSON.stringify({step_number:Number($('stepNumber').value), body:$('stepBody').value, lore_item_ids:lore})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function addFableNote(id) { try { await api(`/fable/matchups/${id}/canon-notes`, {method:'POST', body: JSON.stringify({kind:$('canonKind').value, note:$('canonNote').value})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function addFableMove(id) { try { await api(`/fable/matchups/${id}/moves`, {method:'POST', body: JSON.stringify({participant_id:Number($('fableParticipant').value), move_text:$('fableMove').value, claimed_source:$('fableCitation').value})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function ruleFableMove() { try { const move = await api(`/fable/moves/${$('fableMoveId').value}/ruling`, {method:'POST', body: JSON.stringify({ruling:$('fableRuling').value, reason:$('fableRulingReason').value, citation:$('fableRulingCitation').value})}); await openFable(move.matchup_id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function saveDebateOutcome(id) { try { const moveIds = $('fableOutcomeMoves').value.split(',').map(value => Number(value.trim())).filter(Boolean); await api(`/fable/matchups/${id}/debate-outcome`, {method:'POST', body: JSON.stringify({outcome:$('fableDebateOutcome').value, note:$('fableDebateNote').value, move_ids:moveIds})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function runFableMatchup(id) { try { const result = await api(`/fable/matchups/${id}/automated-run`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function runFableReferee(id) { try { const result = await api(`/fable/matchups/${id}/automated-referee`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+
 document.body.addEventListener('click', event => {
+  const fableButton = event.target.closest('[data-open-fable]');
+  if (fableButton) openFable(Number(fableButton.dataset.openFable));
   const debateButton = event.target.closest('[data-open-debate]');
   if (debateButton) openWorkspace({id: Number(debateButton.dataset.openDebate)});
   const entryButton = event.target.closest('[data-open-entry]');

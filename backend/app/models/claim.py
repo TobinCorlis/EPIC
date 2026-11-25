@@ -30,6 +30,8 @@ class Claim(Base):
     scope_timeframe: Mapped[str | None] = mapped_column(String(300), nullable=True)
     scope_geography: Mapped[str | None] = mapped_column(String(300), nullable=True)
     scope_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    answerability: Mapped[str] = mapped_column(String(40), default="factual")
+    answerability_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     corrections = relationship("ClaimCorrection", back_populates="claim", cascade="all, delete-orphan")

@@ -1,6 +1,16 @@
 """Auditable claim confidence. This is not a verification and not a truth probability.
 
+Credibility is judged only on checkable evidence for this claim: whether the
+data or method was reviewed, whether the cited study or test was found and
+done, the source's record of corrections and false information, and
+independent corroboration. Publisher, author, and group names are not score
+weights. EPIC does not censor. A correct sub-claim keeps its own support when
+a different conclusion from the same source is Refuted. Nothing is Refuted
+without recorded counterevidence on that claim.
+
 Scoring rules, applied in this order:
+0. A question marked not factually answerable gets no score and no
+   Supported or Refuted label.
 1. No supporting evidence, or a cited source with no findable record, scores 0
    and is labeled Unsupported. The missing citation is recorded as
    'cited source: no record found'. A source counts as findable only after a
@@ -193,6 +203,19 @@ def _source_brief(link: ClaimEvidence) -> dict:
 
 
 def assess_claim(db: Session, claim_id: int) -> dict:
+    claim = db.get(Claim, claim_id)
+    if claim is not None and claim.answerability == "not_factually_answerable":
+        breakdown = _assessment(None, "", [])
+        breakdown["label"] = None
+        breakdown["not_factually_answerable"] = True
+        breakdown["answerability_reason"] = claim.answerability_reason
+        breakdown["scale"] = None
+        _store(db, claim_id, breakdown)
+        for knowledge in db.query(KnowledgeClaim).filter(KnowledgeClaim.originating_claim_id == claim_id):
+            if knowledge.status not in {KnowledgeStatus.verified, KnowledgeStatus.archived}:
+                knowledge.confidence_score = None
+        return breakdown
+
     links = (
         db.query(ClaimEvidence)
         .options(joinedload(ClaimEvidence.citation).joinedload(Citation.source), joinedload(ClaimEvidence.challenges))

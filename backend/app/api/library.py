@@ -60,7 +60,10 @@ def _guard(action):
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
-def _version_read(version: ReferenceEntryVersion) -> LibraryVersionRead:
+def _version_read(db: Session, version: ReferenceEntryVersion) -> LibraryVersionRead:
+    from app.services.reference_library import relabel_version_confidence
+
+    relabel_version_confidence(db, version)
     parsed = None
     if version.confidence_json:
         try:
@@ -131,8 +134,8 @@ def _read_entry(db: Session, entry: ReferenceEntry) -> LibraryEntryRead:
         reevaluation_pending=entry.reevaluation_pending,
         needs_review=entry.needs_review,
         status_label=label,
-        current_version=_version_read(current) if current else None,
-        versions=[_version_read(version) for version in versions],
+        current_version=_version_read(db, current) if current else None,
+        versions=[_version_read(db, version) for version in versions],
         supporting_claim_ids=claim_ids,
         supporting_claims=[LibraryClaimBrief(id=claim.id, body=claim.body) for claim in claims],
         source_ids=source_ids,

@@ -27,6 +27,8 @@ class Debate(Base):
     question_timeframe: Mapped[str | None] = mapped_column(String(300), nullable=True)
     question_geography: Mapped[str | None] = mapped_column(String(300), nullable=True)
     question_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    answerability: Mapped[str] = mapped_column(String(40), default="factual")
+    answerability_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[DebateStatus] = mapped_column(SqlEnum(DebateStatus), default=DebateStatus.draft)
     library_stale: Mapped[bool] = mapped_column(Boolean, default=False)

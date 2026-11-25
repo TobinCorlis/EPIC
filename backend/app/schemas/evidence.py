@@ -135,8 +135,10 @@ class ConfidenceFactorRead(BaseModel):
 class ConfidenceAssessmentRead(BaseModel):
     claim_id: int
     confidence_score: float | None
-    label: str = "Unsupported"
-    scale: str = "0–1"
+    label: str | None = None
+    not_factually_answerable: bool = False
+    answerability_reason: str | None = None
+    scale: str | None = "0–1"
     cited_source_note: str | None = None
     contradicting_sources: list[dict] = []
     factors: list[ConfidenceFactorRead]
