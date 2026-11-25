@@ -182,7 +182,12 @@ def _notice_result(kind: str) -> str | None:
 
 
 def _crossref_notices(message: dict, query: str, subject_doi: str) -> list[dict]:
-    """Name the retracted paper and the notice. Do not call the paper the notice."""
+    """Direction matters.
+
+    update-to on record X means X updates or retracts the target. updated-by,
+    or a relation in which another record points at X, means X is retracted.
+    A notice is not an adverse result and does not start the cascade.
+    """
     subject = subject_doi.casefold()
     rows = []
     seen = set()
@@ -190,7 +195,7 @@ def _crossref_notices(message: dict, query: str, subject_doi: str) -> list[dict]
     def other_doi(value) -> str:
         return str(value or "").removeprefix("https://doi.org/").strip().rstrip(").,;")
 
-    def add_retraction(notice: str, kind: str) -> None:
+    def add_retracted(notice: str, kind: str) -> None:
         notice = other_doi(notice)
         if not notice or notice.casefold() == subject or ("retracted", notice) in seen:
             return
@@ -223,37 +228,64 @@ def _crossref_notices(message: dict, query: str, subject_doi: str) -> list[dict]
             ),
         ))
 
-    for item in message.get("update-to") or []:
-        if not isinstance(item, dict):
-            continue
-        kind = str(item.get("type") or item.get("label") or "")
-        result = _notice_result(kind)
-        target = other_doi(item.get("DOI") or item.get("id"))
+    def add_other(result: str, target: str, kind: str, inbound: bool) -> None:
+        target = other_doi(target)
+        if not target or target.casefold() == subject:
+            return
         if result == "retracted":
-            add_retraction(target, kind)
-        elif result is not None and target and target.casefold() != subject:
+            if inbound:
+                add_retracted(target, kind)
+            else:
+                add_notice_of(target, kind)
+            return
+        if not inbound:
             rows.append(_draft(
                 checker_name="notice",
                 api_name=CROSSREF,
                 query=query,
-                result=result,
+                result=f"{result}_notice",
                 response_id=target,
                 evidence_url=f"https://doi.org/{target}",
-                detail=f"Crossref relation '{kind}'. Related DOI {target}.",
+                detail=f"This record {subject_doi} is the {kind} for {target}. It is not itself {result}.",
             ))
+            return
+        rows.append(_draft(
+            checker_name="notice",
+            api_name=CROSSREF,
+            query=query,
+            result=result,
+            response_id=target,
+            evidence_url=f"https://doi.org/{target}",
+            detail=f"This record {subject_doi} was updated by {target}. Crossref relation '{kind}'.",
+        ))
+
+    for item in message.get("update-to") or []:
+        if isinstance(item, dict):
+            kind = str(item.get("type") or item.get("label") or "")
+            result = _notice_result(kind)
+            if result:
+                add_other(result, item.get("DOI") or item.get("id"), kind, inbound=False)
+    for item in message.get("updated-by") or []:
+        if isinstance(item, dict):
+            kind = str(item.get("type") or item.get("label") or "")
+            result = _notice_result(kind)
+            if result:
+                add_other(result, item.get("DOI") or item.get("id"), kind, inbound=True)
     for key, items in (message.get("relation") or {}).items():
         folded = str(key).casefold()
-        if _notice_result(folded) is None and "retract" not in folded:
+        outbound_notice = "retraction-of" in folded or folded in {"retracts", "is-retraction-of"}
+        # Relation keys that are not a retraction stay out of this loop.
+        # An erratum relation is not a retraction of this record.
+        if "retract" not in folded and _notice_result(folded) != "retracted":
             continue
-        notice_of_paper = "retraction-of" in folded or folded in {"retracts", "is-retraction-of"}
         for item in items or []:
             if not isinstance(item, dict):
                 continue
-            target = other_doi(item.get("id") or item.get("DOI"))
-            if notice_of_paper:
+            target = item.get("id") or item.get("DOI")
+            if outbound_notice:
                 add_notice_of(target, key)
-            elif _notice_result(folded) == "retracted" or "retract" in folded:
-                add_retraction(target, key)
+            else:
+                add_retracted(target, key)
     return rows
 
 

@@ -3,6 +3,7 @@ import itertools
 import json
 import os
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -127,7 +128,7 @@ def _review(headers, source_id):
     assert reviewed.status_code == 200, reviewed.text
 
 
-def _crossref(doi, title, author="Lovelace", year=2020, journal="Journal of Examples", notices=None):
+def _crossref(doi, title, author="Lovelace", year=2020, journal="Journal of Examples", notices=None, updated_by=None):
     message = {
         "DOI": doi,
         "title": [title],
@@ -136,6 +137,8 @@ def _crossref(doi, title, author="Lovelace", year=2020, journal="Journal of Exam
         "container-title": [journal],
         "update-to": notices or [],
     }
+    if updated_by is not None:
+        message["updated-by"] = updated_by
     return json_response(200, {"status": "ok", "message": message}, f"https://api.crossref.org/works/{doi}")
 
 
@@ -276,7 +279,7 @@ def test_retraction_cascades_and_blocks_verified():
         (lambda method, url: "api.crossref.org" in url, _crossref(
             "10.1000/retracted",
             "Retracted shoreline study",
-            notices=[{"type": "retraction", "DOI": "10.1000/notice", "label": "Retraction"}],
+            updated_by=[{"type": "retraction", "DOI": "10.1000/notice", "label": "Retraction"}],
         )),
     ]))
     checks = client.post(f"/sources/{source['id']}/checks", headers=headers).json()
@@ -997,7 +1000,7 @@ def test_worker_retraction_uses_the_crossref_title_and_a_system_actor():
         (lambda method, url: "api.crossref.org" in url, _crossref(
             "10.1000/sys-retract",
             "Retracted shoreline study",
-            notices=[{"type": "retraction", "DOI": "10.1000/sys-notice", "label": "Retraction"}],
+            updated_by=[{"type": "retraction", "DOI": "10.1000/sys-notice", "label": "Retraction"}],
         )),
     ])
     process_verification_job(job_id, transport=transport)
@@ -1108,45 +1111,136 @@ def test_oversized_response_is_not_written_into_the_cache(monkeypatch):
         assert db.query(FactcheckCache).filter(FactcheckCache.url == url).count() == 0
 
 
-def _work(doi, title, update_to=None, relation=None):
-    message = {
-        "DOI": doi,
-        "title": [title],
-        "author": [{"family": "Lovelace", "given": "Ada"}],
-        "issued": {"date-parts": [[2020]]},
-        "container-title": ["Journal of Examples"],
-    }
-    if update_to is not None:
-        message["update-to"] = update_to
-    if relation is not None:
-        message["relation"] = relation
-    return json_response(200, {"status": "ok", "message": message}, f"https://api.crossref.org/works/{doi}")
+def _crossref_fixture(name: str) -> dict:
+    path = Path(__file__).resolve().parent / "fixtures" / "crossref" / name
+    return json.loads(path.read_text())
 
 
-def test_retraction_names_the_paper_and_the_notice():
+def _fixture_response(name: str):
+    payload = _crossref_fixture(name)
+    doi = payload["message"]["DOI"]
+    return json_response(200, payload, f"https://api.crossref.org/works/{doi}")
+
+
+def test_retraction_notice_is_not_the_retracted_paper():
+    """Fixtures captured from api.crossref.org for 10.1038/nature01464 and 10.1038/35099520."""
     headers, _user_id = _user(UserRole.moderator)
-    paper = _source(headers, "Retracted paper", "https://doi.org/10.1038/35099520")
-    notice = _source(headers, "Retraction notice", "https://doi.org/10.1038/nature01464")
+    paper = _source(
+        headers,
+        "Self-assembled monolayer organic field-effect transistors",
+        "https://doi.org/10.1038/35099520",
+        author="Jan Hendrik Schön",
+        year="2001-10-18T00:00:00",
+    )
+    notice = _source(
+        headers,
+        "Retraction Note to: Self-assembled monolayer organic field-effect transistors",
+        "https://doi.org/10.1038/nature01464",
+        author="Jan Hendrik Schön",
+        year="2003-03-01T00:00:00",
+    )
     set_transport(FakeTransport([
-        (lambda method, url: "10.1038/35099520" in url, _work(
-            "10.1038/35099520",
-            "Retracted paper",
-            update_to=[{"type": "retraction", "DOI": "10.1038/nature01464", "label": "Retraction"}],
-        )),
-        (lambda method, url: "10.1038/nature01464" in url, _work(
-            "10.1038/nature01464",
-            "Retraction notice",
-            relation={"is-retraction-of": [{"id": "10.1038/35099520", "id-type": "doi"}]},
-        )),
+        (lambda method, url: "10.1038/35099520" in url, _fixture_response("10.1038_35099520.json")),
+        (lambda method, url: "10.1038/nature01464" in url, _fixture_response("10.1038_nature01464.json")),
     ]))
     paper_rows = client.post(f"/sources/{paper['id']}/checks", headers=headers).json()
-    retraction = next(row for row in paper_rows if row["checker_name"] == "retraction" and not row["superseded"])
+    retraction = next(row for row in paper_rows if row["result"] == "retracted" and not row["superseded"])
     assert "This paper 10.1038/35099520 is retracted" in retraction["detail"]
     assert "Notice DOI 10.1038/nature01464" in retraction["detail"]
     assert "Notice DOI 10.1038/35099520" not in retraction["detail"]
+    paper_record = client.get(f"/sources/{paper['id']}/record").json()
+    assert paper_record["retracted"] >= 1
+    assert paper_record["track_factor"] == 0
     notice_rows = client.post(f"/sources/{notice['id']}/checks", headers=headers).json()
     assert not any(row["result"] == "retracted" and not row["superseded"] for row in notice_rows)
-    assert any("retraction notice for 10.1038/35099520" in row["detail"] for row in notice_rows)
+    assert any(
+        row["result"] == "retraction_notice" and "retraction notice for 10.1038/35099520" in row["detail"] and not row["superseded"]
+        for row in notice_rows
+    )
+    notice_record = client.get(f"/sources/{notice['id']}/record").json()
+    assert notice_record["retracted"] == 0
+    assert notice_record["track_factor"] is None
+    with SessionLocal() as db:
+        from app.models.library import UpstreamInvalidation as Invalidation
+
+        assert (
+            db.query(Invalidation)
+            .filter(Invalidation.subject_id == notice["id"], Invalidation.reversed_reason.is_(None))
+            .count()
+            == 0
+        )
+
+
+def test_misread_notice_invalidation_is_reversed_and_the_title_is_filled():
+    from app.models.auth import User
+    from app.models.library import UpstreamInvalidation as Invalidation
+    from app.services.factcheck.backfill import MISREAD_RETRACTION_REASON, repair_misread_retraction_notices
+
+    headers, user_id = _user()
+    paper = _source(
+        headers,
+        "Self-assembled monolayer organic field-effect transistors",
+        "https://doi.org/10.1038/35099520?repair=1",
+    )
+    notice = _source(
+        headers,
+        "Retraction notice 10.1038/nature01464",
+        "https://doi.org/10.1038/nature01464?repair=1",
+    )
+    fixture = _crossref_fixture("10.1038_nature01464.json")
+    real_title = fixture["message"]["title"][0]
+    with SessionLocal() as db:
+        db.add(SourceCheck(
+            source_id=notice["id"],
+            checker_name="retraction",
+            checker_version="factcheck-v1",
+            api_name="api.crossref.org",
+            query="works/10.1038/nature01464",
+            response_id="10.1038/35099520",
+            result="retracted",
+            detail="This paper 10.1038/nature01464 is retracted. Notice DOI 10.1038/35099520. Crossref relation 'retraction'.",
+        ))
+        wrong = Invalidation(
+            subject_type="source",
+            subject_id=notice["id"],
+            kind="retraction",
+            reason="This paper 10.1038/nature01464 is retracted.",
+            source_id=paper["id"],
+            recorded_by_user_id=user_id,
+            actor="system:factcheck",
+        )
+        kept = Invalidation(
+            subject_type="source",
+            subject_id=paper["id"],
+            kind="retraction",
+            reason="This paper 10.1038/35099520 is retracted. Notice DOI 10.1038/nature01464.",
+            source_id=notice["id"],
+            recorded_by_user_id=user_id,
+            actor="system:factcheck",
+        )
+        db.add(wrong)
+        db.add(kept)
+        db.commit()
+        check_id = db.query(SourceCheck).filter(SourceCheck.source_id == notice["id"]).one().id
+        repair_misread_retraction_notices(db, {"10.1038/nature01464": {
+            "title": real_title,
+            "author": "Jan Hendrik Schön",
+            "year": 2003,
+            "journal": "Nature",
+        }})
+        db.commit()
+        stored_notice = db.get(Invalidation, wrong.id)
+        stored_paper = db.get(Invalidation, kept.id)
+        actor = db.get(User, stored_notice.reversed_by_user_id)
+        assert stored_notice.reversed_reason == MISREAD_RETRACTION_REASON
+        assert actor.display_name == "system:factcheck"
+        assert stored_paper.reversed_reason is None
+        assert db.get(SourceCheck, check_id).superseded is True
+    assert client.get(f"/sources/{notice['id']}").json()["title"] == real_title
+    assert client.get(f"/sources/{notice['id']}/record").json()["retracted"] == 0
+    assert client.get(f"/sources/{notice['id']}/record").json()["track_factor"] is None
+    assert client.get(f"/sources/{paper['id']}/record").json()["retracted"] >= 1
+    assert client.get(f"/sources/{paper['id']}/record").json()["track_factor"] == 0
 
 
 def test_queue_keeps_only_the_latest_quote_check_and_names_the_claim():

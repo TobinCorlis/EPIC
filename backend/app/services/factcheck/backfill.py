@@ -1,6 +1,13 @@
 """Backfills for fact-check rows recorded before later rules."""
+import re
+from datetime import datetime
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+MISREAD_RETRACTION_REASON = "notice misread as retracted paper"
+_PLACEHOLDER_TITLE = re.compile(r"^Retraction notice\s+(10\.\S+)$", re.I)
+_NOTICE_TITLE = re.compile(r"^\s*retraction(?:\s+note|\s+notice)?\b", re.I)
 
 
 def backfill_invalidation_actors(bind) -> None:
@@ -105,3 +112,95 @@ def supersede_older_checks(session: Session) -> None:
         for older in group[:-1]:
             older.superseded = True
     session.flush()
+
+
+def _source_doi(source) -> str | None:
+    from app.services.factcheck.text import extract_doi
+
+    return extract_doi(source.url, source.document_reference)
+
+
+def retitle_placeholder_notices(session: Session, titles_by_doi: dict | None = None) -> int:
+    """Replace 'Retraction notice <DOI>' with the Crossref title. Returns how many changed."""
+    from app.models.evidence import Source
+    from app.services.factcheck.checkers import crossref_record
+    from app.services.factcheck.http import HttpxTransport
+
+    changed = 0
+    transport = None
+    for source in session.query(Source).all():
+        match = _PLACEHOLDER_TITLE.match(source.title or "")
+        if match is None:
+            continue
+        doi = match.group(1)
+        record = None
+        if titles_by_doi is not None:
+            record = titles_by_doi.get(doi) or titles_by_doi.get(doi.lower())
+        else:
+            if transport is None:
+                transport = HttpxTransport()
+            try:
+                record = crossref_record(transport, doi)
+            except Exception:
+                record = None
+        if not record or not record.get("title"):
+            continue
+        source.title = record["title"][:500]
+        if record.get("author"):
+            source.author = str(record["author"])[:300]
+        if record.get("journal"):
+            source.publisher = record["journal"][:300]
+        if record.get("year"):
+            source.publication_date = datetime(int(record["year"]), 1, 1)
+        changed += 1
+    session.flush()
+    return changed
+
+
+def repair_misread_retraction_notices(session: Session, titles_by_doi: dict | None = None) -> int:
+    """Reverse invalidations that treated a retraction notice as the retracted paper.
+
+    Audit rows stay. The wrong check is superseded. The reversal reason is
+    'notice misread as retracted paper' and the actor is system:factcheck.
+    """
+    from app.models.evidence import Source
+    from app.models.factcheck import SourceCheck
+    from app.models.library import UpstreamInvalidation
+    from app.services.factcheck.runner import system_factcheck_user
+    from app.services.reference_library import reverse_upstream_invalidation
+
+    retitle_placeholder_notices(session, titles_by_doi)
+    reversed_count = 0
+    for source in session.query(Source).all():
+        if _NOTICE_TITLE.match(source.title or "") is None:
+            continue
+        checks = (
+            session.query(SourceCheck)
+            .filter(
+                SourceCheck.source_id == source.id,
+                SourceCheck.checker_name == "retraction",
+                SourceCheck.result == "retracted",
+                SourceCheck.superseded.is_(False),
+            )
+            .all()
+        )
+        for check in checks:
+            check.superseded = True
+        invalidations = (
+            session.query(UpstreamInvalidation)
+            .filter(
+                UpstreamInvalidation.subject_type == "source",
+                UpstreamInvalidation.subject_id == source.id,
+                UpstreamInvalidation.kind == "retraction",
+                UpstreamInvalidation.reversed_reason.is_(None),
+            )
+            .all()
+        )
+        if not invalidations:
+            continue
+        actor = system_factcheck_user(session)
+        for invalidation in invalidations:
+            reverse_upstream_invalidation(session, invalidation, actor, MISREAD_RETRACTION_REASON)
+            reversed_count += 1
+    session.flush()
+    return reversed_count
