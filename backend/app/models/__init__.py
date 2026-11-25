@@ -65,3 +65,4 @@ from app.models.library import (
 )
 from app.models.correction import ClaimCorrection
 from app.models.collaboration import DebateEvent, DebateInvitation, InvitationStatus, DebateTurn, DebateRoomState, TurnModerationReview, ModerationReviewStatus
+from app.models.fable import FableCanonNote, FableLoreItem, FableMatchup, FableMove, FableParticipant, FableReasoningStep, FableStepLore

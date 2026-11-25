@@ -146,6 +146,29 @@ def _confidence_json(db: Session, claim_ids: list[int]) -> str:
     return json.dumps(breakdowns)
 
 
+def relabel_version_confidence(db: Session, version: ReferenceEntryVersion) -> None:
+    """Fill a snapshot saved before confidence labels existed."""
+    if not version.confidence_json:
+        return
+    try:
+        data = json.loads(version.confidence_json)
+    except json.JSONDecodeError:
+        return
+    if not isinstance(data, list) or not data:
+        return
+    if all(isinstance(item, dict) and item.get("label") for item in data):
+        return
+    claim_ids = [
+        row[0]
+        for row in db.query(ReferenceEntryClaim.claim_id)
+        .filter(ReferenceEntryClaim.entry_id == version.entry_id)
+        .order_by(ReferenceEntryClaim.id)
+        .all()
+    ]
+    if claim_ids:
+        version.confidence_json = _confidence_json(db, claim_ids)
+
+
 def _link_evidence_ids(db: Session, claim_ids: list[int]) -> list[int]:
     if not claim_ids:
         return []
@@ -166,7 +189,12 @@ def create_entry(db: Session, user_id: int, payload) -> ReferenceEntry:
             raise LibraryError(404, f"Claim {claim_id} not found")
         if not db.query(ClaimEvidence).filter(ClaimEvidence.claim_id == claim_id).first():
             raise LibraryError(422, f"Claim {claim_id} has no recorded evidence")
+        if claim.answerability == "not_factually_answerable":
+            raise LibraryError(422, "A question that is not factually answerable is not stored in the factual reference library.")
         claims.append(claim)
+    for debate in db.query(Debate).filter(Debate.answerability == "not_factually_answerable").all():
+        if questions_match(payload.question, debate.fixed_question):
+            raise LibraryError(422, "A question that is not factually answerable is not stored in the factual reference library.")
     if payload.status == "verified" and not payload.verification_event_ids:
         raise LibraryError(422, "A verified library entry requires a recorded verification event")
     for event_id in payload.verification_event_ids:
@@ -335,6 +363,8 @@ def annotate_point(db: Session, subject, *, claim_id: int | None = None, argumen
 
 
 def consider_debate(db: Session, debate: Debate) -> None:
+    if getattr(debate, "answerability", "factual") == "not_factually_answerable":
+        return
     entry = find_entry(
         db,
         debate.fixed_question,
@@ -393,6 +423,12 @@ def consider_text(
     argument_node_id: int | None = None,
 ) -> list[int]:
     """Return research job ids that the caller should enqueue after commit."""
+    if claim_id is not None:
+        claim = db.get(Claim, claim_id)
+        if claim is not None and claim.answerability == "not_factually_answerable":
+            return []
+    if getattr(debate, "answerability", "factual") == "not_factually_answerable":
+        return []
     entry = _attached_entry(db, debate)
     if entry is None:
         entry = find_entry(

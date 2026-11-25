@@ -75,6 +75,8 @@ def add_claim(
         scope_timeframe=payload.scope_timeframe,
         scope_geography=payload.scope_geography,
         scope_metric=payload.scope_metric,
+        answerability=payload.answerability,
+        answerability_reason=(payload.answerability_reason or "").strip() or None,
     )
     db.add(claim)
     db.flush()

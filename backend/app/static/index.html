@@ -19,11 +19,13 @@
 <p id="authMsg" class="notice"></p>
 </section>
 <section id="app" hidden>
+<nav class="tabs" aria-label="EPIC sections"><button type="button" class="tab" id="tabFactual" aria-selected="true" onclick="showProduct('factual')">Factual record</button><button type="button" class="tab" id="tabFable" aria-selected="false" onclick="showProduct('fable')">EPIC FABLE</button></nav>
 <div id="home">
 <div class="hero"><div><h1 id="welcome">EPIC workspace</h1><p>Fixed questions. Reviewable claims. Auditable evidence.</p></div><div id="counts" class="counts"></div></div>
 <div id="onboarding" class="card onboarding"><b>First-use path</b><span>1. Create a debate</span><span>2. Open its workspace</span><span>3. Add claims and evidence</span><span>4. Export the record</span></div>
 <div class="grid">
-<section class="card"><h2>Create debate</h2><input id="debateTitle" placeholder="Debate title"><textarea id="question" placeholder="Fixed debate question"></textarea><textarea id="description" placeholder="Description"></textarea><details><summary>Question scope (optional)</summary><input id="questionPopulation" placeholder="Population"><input id="questionTimeframe" placeholder="Timeframe"><input id="questionGeography" placeholder="Geography"><input id="questionMetric" placeholder="Metric or definition"></details><button type="button" onclick="createDebate()">Create debate</button><p id="createMsg" class="notice"></p></section>
+<section class="card"><h2>Scoring standards</h2><p class="library-intro">Credibility is judged on checkable evidence for a claim: reviewed data or method, whether the cited study exists, its correction record, and independent corroboration. A source is not down-weighted for who published it or which group they belong to. A correct sub-claim keeps its support when another conclusion from the same source is refuted. Nothing is refuted without recorded counterevidence. EPIC does not censor.</p></section>
+<section class="card"><h2>Create debate</h2><input id="debateTitle" placeholder="Debate title"><textarea id="question" placeholder="Fixed debate question"></textarea><textarea id="description" placeholder="Description"></textarea><label for="debateAnswerability">Question category</label><select id="debateAnswerability"><option value="factual">Factual</option><option value="not_factually_answerable">Not factually answerable</option></select><input id="debateAnswerabilityReason" placeholder="Reason if not factually answerable"><details><summary>Question scope (optional)</summary><input id="questionPopulation" placeholder="Population"><input id="questionTimeframe" placeholder="Timeframe"><input id="questionGeography" placeholder="Geography"><input id="questionMetric" placeholder="Metric or definition"></details><button type="button" onclick="createDebate()">Create debate</button><p id="createMsg" class="notice"></p></section>
 <section class="card"><h2>Start research</h2><input id="researchQuery" placeholder="Research question"><button type="button" onclick="startResearch()">Start background job</button><p class="library-intro">Automated research is not implemented. The job records that status instead of a completed result.</p></section>
 </div>
 <section class="card"><h2>Debates</h2><div id="debates"></div></section>
@@ -37,6 +39,15 @@
 <section class="card"><h2>Verified knowledge claims</h2><p class="library-intro">A verified claim can be sent back for re-evaluation. The request records who asked, when, and why.</p><div id="verifiedClaims"></div></section>
 <section class="card"><h2>Research progress</h2><div id="jobs"></div></section>
 </div>
+<section id="fablePanel" class="card" hidden>
+<h2>EPIC FABLE</h2>
+<p class="library-intro">Fictional Analysis Based on Lore Evidence. This is fiction. Lore is not evidence and is never part of the factual reference library.</p>
+<p class="library-intro">An AI matchup run is not implemented. In a debate, humans argue from their own knowledge and must supply each power or feat and its canon citation. The referee rules only those moves. It does not coach, suggest powers, answer questions, or introduce a counter a debater did not raise. Automated AI refereeing is not implemented. A moderator can rule by hand. EPIC cannot fully prevent a debater from consulting material outside this room. Debate outcomes and AI matchup outcomes are stored separately.</p>
+<label for="fableMode">Mode</label><select id="fableMode"><option value="ai_matchup">AI matchup</option><option value="debate">Debate (personal knowledge)</option></select>
+<input id="fableTitle" placeholder="Matchup title"><textarea id="fableQuestion" placeholder="Fictional question"></textarea><input id="fableCharacters" placeholder="Characters, separated by commas">
+<button type="button" onclick="createFable()">Create matchup</button><p id="fableMsg" class="notice"></p>
+<div id="fableList"></div><div id="fableDetail"></div>
+</section>
 <section id="workspace" class="card" hidden>
 <div class="row spread"><div><h2 id="workspaceTitle">Debate workspace</h2><p id="workspaceQuestion"></p></div><button type="button" class="secondary" onclick="closeWorkspace()">Back to debates</button></div>
 <div id="libraryBanner" class="library-banner" hidden></div>
@@ -55,7 +66,7 @@
 <h3>Add claim</h3>
 <textarea id="claimBody" placeholder="Enter one clear claim"></textarea>
 <textarea id="claimUncertainty" placeholder="Uncertainty or gap (optional)"></textarea>
-<select id="claimType"><option value="factual">Factual</option><option value="inferential">Inferential</option><option value="opinion">Opinion</option></select>
+<select id="claimType"><option value="factual">Factual</option><option value="inferential">Inferential</option><option value="opinion">Opinion</option></select><label for="claimAnswerability">Claim category</label><select id="claimAnswerability"><option value="factual">Factual</option><option value="not_factually_answerable">Not factually answerable</option></select><input id="claimAnswerabilityReason" placeholder="Reason if this claim is not factually answerable">
 <details><summary>Claim scope (optional)</summary><input id="claimPopulation" placeholder="Population"><input id="claimTimeframe" placeholder="Timeframe"><input id="claimGeography" placeholder="Geography"><input id="claimMetric" placeholder="Metric or definition"></details>
 <button type="button" onclick="addClaim()">Add claim</button>
 <p id="claimMsg" class="notice"></p>
@@ -116,6 +127,6 @@
 </section>
 </section>
 </main>
-<script src="/static/app.js?v=17"></script>
+<script src="/static/app.js?v=19"></script>
 </body>
 </html>

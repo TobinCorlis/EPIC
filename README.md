@@ -94,6 +94,16 @@ The rules, in order, are:
 
 Scope checks use only the population, timeframe, geography, metric, and study type a user entered, plus a few wording patterns (some stated as all, a correlation or observational study stated as causation, a city or state study stated as national). They do not read an external paper. A flag means needs review. It does not reject the claim. An outlier is flagged only when a contradicting link is already recorded on that claim. A near match on question text with a different entered scope is a different question.
 
+## Scoring standards
+
+Credibility is judged only on checkable evidence for the claim: whether the data or method can be verified, whether the cited study or test exists and was done, the source's record of corrections and false information, and independent corroboration. EPIC does not down-weight a source because of who published it or which group they belong to, and it does not censor. Scoring is per claim. A correct sub-claim keeps its support when a different conclusion from the same source is Refuted. Nothing is Refuted without recorded counterevidence on that claim.
+
+A question marked not factually answerable — fiction, pure opinion, or a hypothetical such as which fictional crew would win — has no confidence score and no Supported or Refuted label. The page says the question has no factual answer. A factual sub-claim can still be scored. That question is not stored in or reused from the factual reference library.
+
+## EPIC FABLE
+
+EPIC FABLE (Fictional Analysis Based on Lore Evidence) is walled off from the factual record. Lore is not evidence and does not appear in factual search or reuse. A matchup is either an AI matchup or a personal-knowledge debate. An AI matchup run is not implemented. In a debate, the debaters supply each power or feat and its canon citation. The referee rules only those moves as Allowed, Disallowed, or Unverified, and does not coach, suggest powers, answer questions, or introduce a counter the debater did not raise. Automated AI refereeing is not implemented. A moderator can rule by hand. Debate outcomes and AI matchup outcomes are stored separately and do not overwrite each other. A side that never raises a valid canon counter can lose. EPIC cannot fully prevent a debater from consulting material outside the room.
+
 ## Reference library
 
 The library reuses a recorded answer when a debate is opened or a claim or argument is added. A match requires the question text and the same entered scope. The answer keeps facts, interpretation, and uncertainty separate, and it links the claims, sources, and verification events already stored. EPIC does not seed answers.

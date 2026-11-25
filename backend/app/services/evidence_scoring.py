@@ -55,6 +55,7 @@ def score_source(
 
 
 def independence_key(source) -> str:
+    """Tell copies of one record apart. The name is not a credibility weight."""
     publisher = getattr(source, "publisher", None)
     if publisher and str(publisher).strip():
         return "publisher:" + str(publisher).strip().lower()
