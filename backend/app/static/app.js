@@ -71,6 +71,26 @@ function written(map, value) {
   return map[value] || (value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Not recorded');
 }
 
+const REVIEW_REASONS = {
+  no_record: 'The cited source has no findable record.',
+  quote_not_found: 'The quoted text was not found in the accessible source text.',
+  text_not_accessible: 'The source text could not be read.',
+  low_confidence: 'A title search was too weak to confirm the source.',
+  check_failed: 'An automated check failed.',
+  metadata_mismatch: 'The entered title, authors, year, or journal does not match the record.',
+  retraction: 'A retraction is recorded for a cited source.',
+  refuted: 'Stronger recorded evidence contradicts the claim.',
+  scope_flag: 'A scope or wording comparison needs review.',
+  moderation: 'A moderation rule flagged this claim.',
+};
+
+function reviewBadge(claim) {
+  if (!claim.needs_review) return '<span class="badge good">No review flag</span>';
+  const reasons = (claim.needs_review_reasons || []).map(code => REVIEW_REASONS[code] || code);
+  const text = reasons.length ? reasons.join(' ') : 'Flagged for review.';
+  return `<span class="badge warn">Flagged for review. ${esc(text)}</span>`;
+}
+
 function confidenceBlock(confidence) {
   if (!confidence) return '<p><b>Confidence:</b> Unknown – not yet rated</p>';
   if (confidence.not_factually_answerable) {
@@ -423,7 +443,8 @@ async function refreshClaims() {
         const flags = (summary.scope_flags || []).filter(flag => flag.claim_evidence_id === item.claim_evidence_id);
         return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · tier ${esc(item.effective_tier)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
       }).join('');
-      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
+      const roleLabel = claim.claim_role === 'attribution' ? 'Attribution claim' : 'Substantive claim';
+      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)} · ${esc(roleLabel)}</b>${reviewBadge(claim)}</div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
     }));
     const present = new Set(claims.map(claim => claim.id));
     const extras = libraryClaims.filter(claim => !present.has(claim.id)).map(claim => `<article class="claim read-only"><b>Library claim #${claim.id}</b><p>${esc(claim.body)}</p><p>Read-only. Linked from library entry #${currentLibraryEntry.id}${currentLibraryEntry.stale ? '. Not the current answer.' : ''}.</p><p><a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p></article>`).join('');

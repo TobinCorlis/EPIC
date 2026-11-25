@@ -28,7 +28,9 @@ Scoring rules, applied in this order:
 5. When those gates pass, the score is
    tier_factor * track_factor * corroboration_factor * counter_factor.
    A missing track record stays unknown and is left out of the product.
-   It is not a zero. Status changes come from recorded human review.
+   It is not a zero. The track counts a publisher correction, a retraction,
+   or a claim from that source found false. A correction to the wording of
+   an EPIC claim is not a correction of the source.
 
 The scale is 0–1. Factor values are rounded to two decimals.
 """
@@ -121,13 +123,15 @@ def source_record(db: Session, source_id: int) -> SourceRecord:
         confirmed = sum(1 for challenge in challenges if challenge.status.value == "denied")
     corrected = 0
     retracted = 0
-    if claim_ids:
-        from app.models.correction import ClaimCorrection
+    from app.models.factcheck import SourceCheck
 
-        corrections = db.query(ClaimCorrection).filter(ClaimCorrection.claim_id.in_(claim_ids)).all()
-        corrected = sum(1 for item in corrections if item.kind == "text" and item.original_body != item.corrected_body)
+    corrected = (
+        db.query(SourceCheck)
+        .filter(SourceCheck.source_id == source_id, SourceCheck.checker_name == "notice", SourceCheck.result == "corrected")
+        .count()
+    )
+    if claim_ids:
         knowledge = db.query(KnowledgeClaim).filter(KnowledgeClaim.originating_claim_id.in_(claim_ids)).all()
-        retracted = sum(1 for item in knowledge if item.status in {KnowledgeStatus.archived, KnowledgeStatus.retired})
         still_verified = [item.id for item in knowledge if item.status == KnowledgeStatus.verified]
         if still_verified:
             confirmed += (
@@ -265,6 +269,9 @@ def _apply_support_label(breakdown: dict, claim, *, attribution_verified: bool, 
         if attribution_verified
         else "Attribution is not verified. A quote match is not assumed."
     )
+    if score == 0 and label not in {LABEL_UNSUPPORTED, LABEL_REFUTED, None, ""}:
+        breakdown["label"] = LABEL_UNSUPPORTED
+        return
     if label in {LABEL_UNSUPPORTED, LABEL_REFUTED} or score == 0:
         return
     if score is None:
@@ -563,8 +570,9 @@ def _rated_breakdown(
     record = source_record(db, best_source.id)
     if record.track_factor is None:
         track_detail = (
-            f"Source {best_source.id} has no recorded corrections, retractions, upheld challenges, "
-            "or confirmations. That is unknown, not a score of zero."
+            f"Source {best_source.id} has no publisher correction, retraction, or claim found false. "
+            "That is unknown, not a score of zero, and it is not used as a multiplier. "
+            "A correction to the wording of an EPIC claim is not a correction of the source."
         )
     else:
         track_detail = (
@@ -576,8 +584,9 @@ def _rated_breakdown(
     if attribution:
         corroboration = 1.0
         corroboration_detail = (
-            f"{len(independent)} cited source(s). A single source containing the quoted text is not "
-            "independent corroboration of a separate fact. The factor is 1 because this claim is only that the source says this."
+            f"{len(independent)} cited source(s). This score rates the attribution: the source contains the quoted text. "
+            "It does not rate whether the underlying statement is true. "
+            "A single source containing the quote is not independent corroboration of a separate fact."
         )
     else:
         corroboration = min(len(independent), 3) / 3

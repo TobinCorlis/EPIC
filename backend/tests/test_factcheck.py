@@ -615,7 +615,9 @@ def test_workspace_shows_the_verification_panel():
     assert "Re-run checks" in script
     assert "Verification queue" in page
     assert "Automated lookup of cited sources is not implemented" not in script
-    assert "app.js?v=22" in page
+    assert "app.js?v=23" in page
+    assert "The quoted text was not found in the accessible source text." in script
+    assert "Attribution claim" in script
     assert "Source #" in script and "Existence" in script and "Archive" in script
 
 
@@ -792,6 +794,97 @@ def test_invalidation_actor_backfill_uses_the_recorded_user():
         stored = db.get(UpstreamInvalidation, row_id)
         assert stored.actor == f"user:{user_id}"
         assert db.get(User, user_id) is not None
+
+
+def test_claim_wording_correction_does_not_zero_the_source_or_the_attribution():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/wording")
+    claim = _debate_claim("The paper says the shoreline rose by one meter.", role="attribution")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/wording", "Measured shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/wording"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/wording",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    edited = client.post(
+        f"/claims/{claim['id']}/corrections",
+        headers=headers,
+        json={"corrected_body": "The paper says the shoreline rose by one meter, on page 4.", "reason": "The page number was added."},
+    )
+    assert edited.status_code == 200, edited.text
+    record = client.get(f"/sources/{source['id']}/record").json()
+    assert record["corrected"] == 0
+    assert record["track_factor"] is None
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["confidence_score"] > 0
+    assert summary["label"] != "Rated"
+    assert summary["attribution_verified"] is True
+    text = " ".join(factor["detail"] for factor in summary["factors"])
+    assert "rates the attribution" in text
+    assert "underlying statement is true" in text
+    assert summary["factors"][1]["value"] is None
+
+
+def test_a_zero_score_is_not_labeled_rated():
+    headers, _user_id = _user()
+    source = _source(headers, "Erratum study", "https://doi.org/10.1000/erratum-zero")
+    claim = _debate_claim("The paper says the shoreline rose by one meter.", role="attribution")
+    _link(claim["id"], source["id"], excerpt="the shoreline rose by one meter")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/erratum-zero", "Erratum study")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/erratum-zero"), text_response(
+            200, "<p>The paper says the shoreline rose by one meter.</p>", "https://doi.org/10.1000/erratum-zero",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    from app.models.factcheck import SourceCheck as CheckRow
+
+    with SessionLocal() as db:
+        db.add(CheckRow(
+            source_id=source["id"],
+            checker_name="notice",
+            checker_version="factcheck-v1",
+            api_name="api.crossref.org",
+            query="works/10.1000/erratum-zero",
+            result="corrected",
+            detail="Crossref relation 'correction'.",
+        ))
+        db.commit()
+    record = client.get(f"/sources/{source['id']}/record").json()
+    assert record["corrected"] == 1
+    assert record["track_factor"] == 0
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()["confidence"]
+    assert summary["confidence_score"] == 0
+    assert summary["label"] != "Rated"
+    assert summary["label"] != "Supported"
+    assert summary["label"] != "Weakly supported"
+
+
+def test_related_work_rerun_updates_the_same_lead():
+    headers, _user_id = _user()
+    source = _source(headers, "Ioannidis essay", "https://doi.org/10.1000/dedupe-lead")
+    claim = _debate_claim("Most published research findings are false.")
+    _link(claim["id"], source["id"])
+    payload = {"results": [{
+        "id": "https://openalex.org/W-same",
+        "display_name": "Why most published research findings are false",
+        "type": "article",
+        "relevance_score": 40,
+    }]}
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/dedupe-lead", "Ioannidis essay")),
+        (lambda method, url: "api.openalex.org/works?search=" in url, json_response(200, payload)),
+        (lambda method, url: "esearch" in url, json_response(200, {"esearchresult": {"idlist": []}})),
+    ]))
+    client.post(f"/claims/{claim['id']}/checks", headers=headers)
+    client.post(f"/claims/{claim['id']}/checks", headers=headers)
+    rows = client.get(f"/claims/{claim['id']}/checks").json()
+    leads = [row for row in rows if row["checker_name"] == "related_work" and row["response_id"] == "https://openalex.org/W-same"]
+    assert len(leads) == 1
 
 
 def test_absent_quote_on_a_confirmed_doi_does_not_reach_supported():

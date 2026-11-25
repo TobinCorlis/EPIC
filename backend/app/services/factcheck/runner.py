@@ -118,9 +118,35 @@ def _entered(source: Source) -> dict:
     return {"title": source.title, "author": source.author, "year": year, "journal": source.publisher}
 
 
+def _matching_lead(db: Session, draft: dict) -> SourceCheck | None:
+    if draft.get("checker_name") != "related_work" or draft.get("claim_id") is None:
+        return None
+    query = db.query(SourceCheck).filter(
+        SourceCheck.checker_name == "related_work",
+        SourceCheck.claim_id == draft["claim_id"],
+    )
+    if draft.get("response_id"):
+        return query.filter(SourceCheck.response_id == draft["response_id"]).order_by(SourceCheck.id).first()
+    if draft.get("evidence_url"):
+        return query.filter(SourceCheck.evidence_url == draft["evidence_url"]).order_by(SourceCheck.id).first()
+    return None
+
+
 def _persist(db: Session, source_id: int | None, drafts: list[dict]) -> list[SourceCheck]:
     rows = []
     for draft in drafts:
+        existing = _matching_lead(db, draft)
+        if existing is not None:
+            existing.result = draft["result"]
+            existing.detail = draft.get("detail") or ""
+            existing.match_score = draft.get("match_score")
+            existing.query = draft["query"]
+            existing.api_name = draft["api_name"]
+            existing.checker_version = draft["checker_version"]
+            existing.evidence_url = draft.get("evidence_url")
+            existing.response_id = draft.get("response_id")
+            rows.append(existing)
+            continue
         row = SourceCheck(
             source_id=draft.get("source_id", source_id),
             claim_id=draft.get("claim_id"),

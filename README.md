@@ -91,7 +91,7 @@ The rules, in order, are:
 - Otherwise the stored formula is `tier_factor * track_factor * corroboration_factor * counter_factor`. Factors are rounded to two decimals.
 
 - `tier_factor` is the strongest supporting source's reviewed tier rank divided by 8. An unreviewed declared type contributes as unknown, not as the declared tier. Tiers are not summed.
-- `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero. A recorded retraction that has not been reversed makes the factor 0.
+- `track_factor` counts only events about the source: a publisher correction or erratum, a retraction, or a claim from that source found false by an upheld challenge. A correction to the wording of an EPIC claim is not one of those events. When none of them is recorded, the factor is unknown and is left out of the product. It is not a multiplier of zero. A recorded retraction that has not been reversed makes the factor 0.
 - `corroboration_factor` is the number of independent supporting sources, capped at 3, divided by 3.
 - `counter_factor` is 1 divided by 1 plus the number of independent contradicting sources whose challenge was not upheld. Upheld challenges refute that contrary evidence and it is reported, then excluded. Nothing outside the database is invented.
 
