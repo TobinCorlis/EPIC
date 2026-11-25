@@ -572,7 +572,7 @@ function showProduct(which) {
   $('fablePanel').hidden = factual;
   $('tabFactual').setAttribute('aria-selected', factual ? 'true' : 'false');
   $('tabFable').setAttribute('aria-selected', factual ? 'false' : 'true');
-  if (!factual) loadFables();
+  if (!factual) { loadFables(); loadRefereeQueue(); }
 }
 
 async function createFable() {
@@ -591,12 +591,19 @@ async function loadFables() {
   } catch (error) { $('fableList').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
 }
 
+function rulingHistory(move) {
+  const history = move.rulings || [];
+  if (!history.length) return `<p>Ruling: ${esc(move.ruling || 'not ruled')}.</p>`;
+  return history.map(item => `<article class="item"><p><b>${esc(item.status)}: ${esc(item.ruling)}</b> · ruled_by ${esc(item.ruled_by)} · provider ${esc(item.provider_name || 'none')} ${esc(item.provider_version || '')} · confidence ${item.confidence == null ? 'none' : esc(item.confidence)}</p><p>Reason: ${esc(item.reason)}</p><p>Citation: ${esc(item.citation)}. Lore item IDs: ${esc((item.lore_item_ids || []).join(', ') || 'none')}.</p>${item.override_reason ? `<p>Override reason: ${esc(item.override_reason)}</p>` : ''}</article>`).join('');
+}
+
 function fableDetail(row) {
   const lore = row.lore.map(item => `<li>#${item.id} ${esc(item.work_title)}, ${esc(item.installment)}, ${esc(item.pinpoint)} · ${esc(item.canon_status)}. ${esc(item.body)}</li>`).join('') || '<li>No lore yet.</li>';
   const steps = row.steps.map(step => `<li>Step ${step.step_number} (lore ${esc(step.lore_item_ids.join(', '))}): ${esc(step.body)}</li>`).join('') || '<li>No reasoning steps yet.</li>';
   const notes = row.canon_notes.map(note => `<li>${esc(note.kind)}: ${esc(note.note)}</li>`).join('') || '<li>None.</li>';
-  const moves = row.moves.map(move => `<li>Move #${move.id}: ${esc(move.move_text)} · ${esc(move.claimed_source)} · ${esc(move.ruling || 'not ruled')}</li>`).join('') || '<li>No moves yet.</li>';
-  const debate = row.mode === 'debate' ? `<h3>Moves</h3><p>There is no control to ask the AI for help. The debater supplies the feat and the citation.</p><ul>${moves}</ul><select id="fableParticipant">${row.participants.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select><textarea id="fableMove" placeholder="Power or feat the debater claims"></textarea><input id="fableCitation" placeholder="Canon citation supplied by the debater"><button type="button" onclick="addFableMove(${row.id})">Record move</button><h3>Moderator ruling</h3><p>${esc(row.referee_scope)}</p><input id="fableMoveId" placeholder="Move id"><select id="fableRuling"><option value="allowed">Allowed</option><option value="disallowed">Disallowed</option><option value="unverified">Unverified</option></select><textarea id="fableRulingReason" placeholder="Reason for this move only"></textarea><input id="fableRulingCitation" placeholder="Citation"><button type="button" onclick="ruleFableMove()">Record moderator ruling</button><h3>Debate outcome</h3><p>Label: debate. This does not write the AI matchup outcome.</p><input id="fableDebateOutcome" placeholder="Outcome, or undetermined by canon"><textarea id="fableDebateNote" placeholder="Based only on the moves made"></textarea><input id="fableOutcomeMoves" placeholder="Ruled move ids, comma separated"><button type="button" onclick="saveDebateOutcome(${row.id})">Save debate outcome</button><p><button type="button" class="secondary" onclick="runFableReferee(${row.id})">Automated AI referee</button> Automated AI refereeing is not implemented.</p>` : `<ul>${moves}</ul><p><button type="button" class="secondary" onclick="runFableMatchup(${row.id})">Run AI matchup</button> An AI matchup run is not implemented.</p>`;
+  const moves = row.moves.map(move => `<li><b>Move #${move.id}:</b> ${esc(move.move_text)}<div>${rulingHistory(move)}</div></li>`).join('') || '<li>No moves yet.</li>';
+  const settings = `<h3>Room settings</h3><label for="refereeMode">Referee mode</label><select id="refereeMode"><option value="ai_auto" ${row.referee_mode==='ai_auto'?'selected':''}>AI auto-rule</option><option value="ai_suggest" ${row.referee_mode==='ai_suggest'?'selected':''}>AI suggests + moderator confirms</option><option value="moderator_only" ${row.referee_mode==='moderator_only'?'selected':''}>Moderator only</option></select><label><input id="canonOnly" type="checkbox" ${row.canon_only?'checked':''}> Canon only</label><label><input id="personalKnowledge" type="checkbox" ${row.personal_knowledge_only?'checked':''}> Personal knowledge only</label><button type="button" onclick="saveFableSettings(${row.id})">Save room settings</button>`;
+  const debate = settings + (row.mode === 'debate' ? `<h3>Moves</h3><p>There is no control to ask the AI for help. The debater supplies the feat and the citation.</p><ul>${moves}</ul><select id="fableParticipant">${row.participants.map(person => `<option value="${person.id}">${esc(person.name)}</option>`).join('')}</select><textarea id="fableMove" placeholder="Power or feat the debater claims"></textarea><input id="fableCitation" placeholder="Canon citation supplied by the debater"><button type="button" onclick="addFableMove(${row.id})">Record move</button><h3>Moderator ruling</h3><p>${esc(row.referee_scope)}</p><input id="fableMoveId" placeholder="Move id"><select id="fableRuling"><option value="allowed">Allowed</option><option value="disallowed">Disallowed</option><option value="unverified">Unverified</option></select><textarea id="fableRulingReason" placeholder="Reason for this move only"></textarea><input id="fableRulingCitation" placeholder="Citation"><button type="button" onclick="ruleFableMove()">Record moderator ruling</button><h3>Debate outcome</h3><p>Label: debate. This does not write the AI matchup outcome.</p><input id="fableDebateOutcome" placeholder="Outcome, or undetermined by canon"><textarea id="fableDebateNote" placeholder="Based only on the moves made"></textarea><input id="fableOutcomeMoves" placeholder="Ruled move ids, comma separated"><button type="button" onclick="saveDebateOutcome(${row.id})">Save debate outcome</button><p><button type="button" class="secondary" onclick="runFableReferee(${row.id})">Run AI referee on submitted moves</button></p>` : `<ul>${moves}</ul><p><button type="button" class="secondary" onclick="runFableMatchup(${row.id})">Run AI matchup</button> An AI matchup run is not implemented.</p>`);
   return `<article class="claim"><p><b>Fiction.</b> ${esc(row.cheating_notice)}</p><h3>${esc(row.title)}</h3><p>${esc(row.question)}</p><p>AI matchup outcome (${esc(row.ai_outcome_label)}): ${esc(row.ai_outcome || 'none')}</p><p>Debate outcome (${esc(row.debate_outcome_label)}): ${esc(row.debate_outcome || 'none')}</p><p>Automated analysis: ${esc(row.automated_analysis)}. Automated referee: ${esc(row.automated_referee)}.</p><h3>Lore</h3><ul>${lore}</ul><input id="loreWork" placeholder="Work title"><input id="loreInstallment" placeholder="Issue, episode, or film"><input id="lorePin" placeholder="Page or timestamp"><select id="loreCanon"><option value="primary_canon">Primary canon</option><option value="secondary">Secondary</option><option value="non_canon">Non-canon</option></select><textarea id="loreBody" placeholder="What the cited lore says"></textarea><button type="button" onclick="addFableLore(${row.id})">Add lore</button><h3>Reasoning</h3><ul>${steps}</ul><input id="stepNumber" type="number" min="1" value="1"><textarea id="stepBody" placeholder="Reasoning using only cited lore"></textarea><input id="stepLore" placeholder="Lore item ids"><button type="button" onclick="addFableStep(${row.id})">Add step</button><h3>Canon notes</h3><ul>${notes}</ul><select id="canonKind"><option value="silent">Canon is silent</option><option value="contradicts">Canon contradicts itself</option></select><textarea id="canonNote" placeholder="Note"></textarea><button type="button" onclick="addFableNote(${row.id})">Add canon note</button>${debate}<p id="fableDetailMsg" class="notice"></p></article>`;
 }
 
@@ -616,6 +623,37 @@ async function addFableMove(id) { try { await api(`/fable/matchups/${id}/moves`,
 async function ruleFableMove() { try { const move = await api(`/fable/moves/${$('fableMoveId').value}/ruling`, {method:'POST', body: JSON.stringify({ruling:$('fableRuling').value, reason:$('fableRulingReason').value, citation:$('fableRulingCitation').value})}); await openFable(move.matchup_id); } catch (error) { msg('fableDetailMsg', error.message); } }
 async function saveDebateOutcome(id) { try { const moveIds = $('fableOutcomeMoves').value.split(',').map(value => Number(value.trim())).filter(Boolean); await api(`/fable/matchups/${id}/debate-outcome`, {method:'POST', body: JSON.stringify({outcome:$('fableDebateOutcome').value, note:$('fableDebateNote').value, move_ids:moveIds})}); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
 async function runFableMatchup(id) { try { const result = await api(`/fable/matchups/${id}/automated-run`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
+async function loadEvidenceChecks() {
+  if (!currentDebate) return;
+  try {
+    const result = await api(`/debates/${currentDebate.id}/evidence-checks`);
+    $('evidenceChecks').innerHTML = result.flags.length ? result.flags.map(flag => `<p><b>${esc(flag.kind)}:</b> ${esc(flag.detail)}</p>`).join('') : '<p class="muted">No recorded citation problem.</p>';
+  } catch (error) { $('evidenceChecks').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
+}
+async function loadRefereeQueue() {
+  try {
+    const rows = await api('/fable/referee/queue');
+    $('refereeQueue').innerHTML = rows.length ? rows.map(row => `<article class="claim"><b>${esc(row.ruling)}</b> on move #${row.move_id} · ${esc(row.ruled_by)} · ${esc(row.provider_name || 'moderator')} ${esc(row.provider_version || '')}<p>${esc(row.reason)}</p><p>Citation: ${esc(row.citation)}. Lore ${esc((row.lore_item_ids || []).join(', ') || 'none')}. Confidence ${row.confidence == null ? 'none' : row.confidence}.</p><button type="button" onclick="acceptRuling(${row.id})">Accept</button> <button type="button" onclick="overrideRuling(${row.id})">Override</button> <button type="button" class="secondary" onclick="recheckRuling(${row.id})">Re-check</button></article>`).join('') : '<p class="muted">No proposed rulings. Participants cannot ask the referee for help.</p>';
+  } catch (error) { $('refereeQueue').innerHTML = `<p class="error">${esc(error.message)}</p>`; }
+}
+async function acceptRuling(id) { await api(`/fable/rulings/${id}/accept`, {method:'POST'}); await loadRefereeQueue(); }
+async function overrideRuling(id) {
+  const reason = window.prompt('Override reason (required)');
+  if (!reason) return;
+  await api(`/fable/rulings/${id}/override`, {method:'POST', body: JSON.stringify({ruling:'disallowed', reason:'Moderator override of the recorded move only.', citation:'moderator record', override_reason:reason})});
+  await loadRefereeQueue();
+}
+async function recheckRuling(id) { await api(`/fable/rulings/${id}/recheck`, {method:'POST'}); await loadRefereeQueue(); }
+async function saveFableSettings(id) {
+  try {
+    await api(`/fable/matchups/${id}/settings`, {method:'PATCH', body: JSON.stringify({
+      referee_mode: $('refereeMode').value,
+      canon_only: $('canonOnly').checked,
+      personal_knowledge_only: $('personalKnowledge').checked,
+    })});
+    await openFable(id);
+  } catch (error) { msg('fableDetailMsg', error.message); }
+}
 async function runFableReferee(id) { try { const result = await api(`/fable/matchups/${id}/automated-referee`, {method:'POST'}); msg('fableDetailMsg', result.detail); await openFable(id); } catch (error) { msg('fableDetailMsg', error.message); } }
 
 document.body.addEventListener('click', event => {

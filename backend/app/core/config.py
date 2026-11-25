@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     worker_poll_seconds: float = 1.0
     worker_max_attempts: int = 3
     enforce_authorization: bool = False
+    referee_llm_base_url: str = ""
+    referee_llm_api_key: str = ""
+    referee_llm_model: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("allowed_origins", "trusted_hosts", mode="before")

@@ -243,8 +243,8 @@ def test_fable_is_walled_off_and_debate_outcomes_stay_separate():
     assert len(decided.json()["moves"]) == 1
     referee = client.post(f"/fable/matchups/{matchup_id}/automated-referee", headers=headers)
     assert referee.status_code == 200, referee.text
-    assert referee.json()["automated_referee"] == "not_implemented"
-    assert "no counter" in referee.json()["detail"].lower()
+    assert referee.json()["moves_added"] == 0
+    assert "did not introduce a counter" in referee.json()["detail"].lower()
     again = client.get(f"/fable/matchups/{matchup_id}").json()
     assert len(again["moves"]) == 1
     assert again["moves"][0]["ruling"] == "allowed"

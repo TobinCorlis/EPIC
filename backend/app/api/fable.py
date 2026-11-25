@@ -13,6 +13,7 @@ from app.models.fable import (
     FableMatchup,
     FableMove,
     FableParticipant,
+    FableRuling,
     FableReasoningStep,
     FableStepLore,
 )
@@ -27,10 +28,16 @@ from app.schemas.fable import (
     FableMoveCreate,
     FableMoveRead,
     FableParticipantRead,
+    FableRulingRead,
     FableRulingCreate,
     FableStepCreate,
     FableStepRead,
 )
+from app.schemas.fable import (
+    FableSettings,
+    FableOverride,
+)
+from app.services.referee import accept_ruling, evidence_flags, override_ruling, rule_submitted_moves
 from app.services.fable import (
     REFEREE_SCOPE,
     FableError,
@@ -38,7 +45,6 @@ from app.services.fable import (
     add_lore,
     add_move,
     add_step,
-    automated_referee,
     automated_run,
     create_matchup,
     record_debate_outcome,
@@ -82,11 +88,13 @@ def _read(db: Session, matchup: FableMatchup) -> FableMatchupRead:
         question=matchup.question,
         mode=matchup.mode,
         personal_knowledge_only=matchup.personal_knowledge_only,
+        referee_mode=matchup.referee_mode,
+        canon_only=matchup.canon_only,
         participants=[FableParticipantRead(id=row.id, name=row.name) for row in participants],
         lore=[FableLoreRead.model_validate(row) for row in lore],
         steps=step_reads,
         canon_notes=[FableCanonNoteRead.model_validate(row) for row in notes],
-        moves=[FableMoveRead.model_validate(row) for row in moves],
+        moves=[_move_read(db, row) for row in moves],
         ai_outcome=matchup.ai_outcome,
         ai_outcome_note=matchup.ai_outcome_note,
         debate_outcome=matchup.debate_outcome,
@@ -140,9 +148,13 @@ def post_note(matchup_id: int, payload: FableCanonNoteCreate, db: Session = Depe
 
 
 @router.post("/matchups/{matchup_id}/moves", response_model=FableMoveRead, status_code=201)
-def post_move(matchup_id: int, payload: FableMoveCreate, db: Session = Depends(get_db), _: User | None = Depends(get_optional_user)):
-    move = _guard(lambda: add_move(db, _require(db, matchup_id), payload))
+def post_move(matchup_id: int, payload: FableMoveCreate, db: Session = Depends(get_db), user: User | None = Depends(get_optional_user)):
+    matchup = _require(db, matchup_id)
+    move = _guard(lambda: add_move(db, matchup, payload))
+    if matchup.mode == "debate" and matchup.referee_mode != "moderator_only":
+        rule_submitted_moves(db, matchup, user.id if user else None)
     db.commit()
+    db.refresh(move)
     return move
 
 
@@ -157,6 +169,17 @@ def post_ruling(
     if move is None:
         raise HTTPException(status_code=404, detail="Move not found")
     _guard(lambda: rule_move(db, move, user.id, payload))
+    db.add(FableRuling(
+        move_id=move.id,
+        ruling=move.ruling,
+        reason=move.reason,
+        citation=move.citation,
+        lore_item_ids="[]",
+        confidence=None,
+        ruled_by="moderator",
+        status="accepted",
+        created_by_user_id=user.id,
+    ))
     db.commit()
     db.refresh(move)
     return move
@@ -188,12 +211,121 @@ def post_automated_run(matchup_id: int, db: Session = Depends(get_db), _: User |
 
 
 @router.post("/matchups/{matchup_id}/automated-referee")
-def post_automated_referee(matchup_id: int, db: Session = Depends(get_db), _: User = Depends(require_authenticated)):
+def post_automated_referee(
+    matchup_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role(UserRole.moderator, UserRole.administrator)),
+):
     matchup = _require(db, matchup_id)
-    before = [(row.id, row.ruling, row.move_text) for row in db.query(FableMove).filter(FableMove.matchup_id == matchup.id).all()]
-    result = automated_referee(matchup)
+    before_ids = [row.id for row in db.query(FableMove).filter(FableMove.matchup_id == matchup.id).all()]
+    rulings = rule_submitted_moves(db, matchup, user.id)
     db.commit()
-    after = [(row.id, row.ruling, row.move_text) for row in db.query(FableMove).filter(FableMove.matchup_id == matchup.id).all()]
+    after_ids = [row.id for row in db.query(FableMove).filter(FableMove.matchup_id == matchup.id).all()]
+    if after_ids != before_ids:
+        raise HTTPException(status_code=409, detail="The referee must not introduce a move.")
+    return {
+        "provider": rulings[0].provider_name if rulings else "deterministic-lore",
+        "rulings_recorded": len(rulings),
+        "moves_added": 0,
+        "detail": "The referee ruled only submitted moves. It did not introduce a counter.",
+    }
+
+
+@router.get("/referee/queue")
+def referee_queue(db: Session = Depends(get_db), _: User = Depends(require_role(UserRole.moderator, UserRole.administrator))):
+    rows = db.query(FableRuling).filter(FableRuling.status == "proposed").order_by(FableRuling.id).all()
+    return [_ruling_dict(row) for row in rows]
+
+
+@router.post("/rulings/{ruling_id}/accept")
+def accept(ruling_id: int, db: Session = Depends(get_db), _: User = Depends(require_role(UserRole.moderator, UserRole.administrator))):
+    ruling = db.get(FableRuling, ruling_id)
+    move = db.get(FableMove, ruling.move_id) if ruling else None
+    if ruling is None or move is None:
+        raise HTTPException(status_code=404, detail="Ruling not found")
+    accept_ruling(ruling, move)
+    db.commit()
+    return _ruling_dict(ruling)
+
+
+@router.post("/rulings/{ruling_id}/override")
+def override(
+    ruling_id: int,
+    payload: FableOverride,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role(UserRole.moderator, UserRole.administrator)),
+):
+    ruling = db.get(FableRuling, ruling_id)
+    move = db.get(FableMove, ruling.move_id) if ruling else None
+    if ruling is None or move is None:
+        raise HTTPException(status_code=404, detail="Ruling not found")
+    before = db.query(FableMove).filter(FableMove.matchup_id == move.matchup_id).count()
+    replacement = override_ruling(db, ruling, move, user.id, payload)
+    db.commit()
+    after = db.query(FableMove).filter(FableMove.matchup_id == move.matchup_id).count()
     if after != before:
-        raise HTTPException(status_code=409, detail="Automated refereeing must not add or change a move.")
-    return result
+        raise HTTPException(status_code=409, detail="An override cannot introduce a move.")
+    history = db.query(FableRuling).filter(FableRuling.move_id == move.id).order_by(FableRuling.id).all()
+    return {"current": _ruling_dict(replacement), "history": [_ruling_dict(row) for row in history]}
+
+
+@router.post("/rulings/{ruling_id}/recheck")
+def recheck(ruling_id: int, db: Session = Depends(get_db), user: User = Depends(require_role(UserRole.moderator, UserRole.administrator))):
+    ruling = db.get(FableRuling, ruling_id)
+    if ruling is None:
+        raise HTTPException(status_code=404, detail="Ruling not found")
+    move = db.get(FableMove, ruling.move_id)
+    matchup = db.get(FableMatchup, move.matchup_id)
+    move.ruling = None
+    created = rule_submitted_moves(db, matchup, user.id)
+    db.commit()
+    return {"rulings": [_ruling_dict(row) for row in created]}
+
+
+@router.patch("/matchups/{matchup_id}/settings", response_model=FableMatchupRead)
+def patch_settings(matchup_id: int, payload: FableSettings, db: Session = Depends(get_db), _: User = Depends(require_role(UserRole.moderator, UserRole.administrator))):
+    matchup = _require(db, matchup_id)
+    matchup.referee_mode = payload.referee_mode
+    matchup.canon_only = payload.canon_only
+    matchup.personal_knowledge_only = payload.personal_knowledge_only
+    db.commit()
+    return _read(db, matchup)
+
+
+def _move_read(db: Session, move: FableMove) -> FableMoveRead:
+    history = db.query(FableRuling).filter(FableRuling.move_id == move.id).order_by(FableRuling.id).all()
+    payload = FableMoveRead.model_validate(move)
+    payload.rulings = [
+        FableRulingRead(
+            id=row.id,
+            ruling=row.ruling,
+            reason=row.reason,
+            citation=row.citation,
+            lore_item_ids=json.loads(row.lore_item_ids or "[]"),
+            confidence=row.confidence,
+            ruled_by=row.ruled_by,
+            provider_name=row.provider_name,
+            provider_version=row.provider_version,
+            status=row.status,
+            override_reason=row.override_reason,
+        )
+        for row in history
+    ]
+    return payload
+
+
+def _ruling_dict(row: FableRuling) -> dict:
+    return {
+        "id": row.id,
+        "move_id": row.move_id,
+        "ruling": row.ruling,
+        "reason": row.reason,
+        "citation": row.citation,
+        "lore_item_ids": json.loads(row.lore_item_ids or "[]"),
+        "confidence": row.confidence,
+        "ruled_by": row.ruled_by,
+        "provider_name": row.provider_name,
+        "provider_version": row.provider_version,
+        "status": row.status,
+        "override_reason": row.override_reason,
+    }

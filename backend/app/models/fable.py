@@ -1,7 +1,7 @@
 """EPIC FABLE is fiction. These rows are not sources, claims, or library entries."""
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.clock import utcnow
@@ -22,6 +22,8 @@ class FableMatchup(Base):
     question: Mapped[str] = mapped_column(Text)
     mode: Mapped[str] = mapped_column(String(40))
     personal_knowledge_only: Mapped[bool] = mapped_column(Boolean, default=True)
+    referee_mode: Mapped[str] = mapped_column(String(40), default="ai_suggest")
+    canon_only: Mapped[bool] = mapped_column(Boolean, default=True)
     ai_outcome: Mapped[str | None] = mapped_column(String(80), nullable=True)
     ai_outcome_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     debate_outcome: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -95,4 +97,25 @@ class FableMove(Base):
     citation: Mapped[str | None] = mapped_column(Text, nullable=True)
     ruled_by: Mapped[str | None] = mapped_column(String(40), nullable=True)
     ruled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class FableRuling(Base):
+    """One referee record. An override is a new row and does not erase the earlier one."""
+
+    __tablename__ = "fable_rulings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    move_id: Mapped[int] = mapped_column(ForeignKey("fable_moves.id"), index=True)
+    ruling: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str] = mapped_column(Text)
+    citation: Mapped[str] = mapped_column(Text)
+    lore_item_ids: Mapped[str] = mapped_column(Text, default="[]")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ruled_by: Mapped[str] = mapped_column(String(40))
+    provider_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    provider_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="proposed")
+    override_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
