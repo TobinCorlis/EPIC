@@ -172,7 +172,7 @@ def rerun_claim_checks(
 def factcheck_queue(db: Session = Depends(get_db), _: User = Depends(require_authenticated)):
     flagged = (
         db.query(SourceCheck)
-        .filter(SourceCheck.result.in_(FLAGGED))
+        .filter(SourceCheck.result.in_(FLAGGED), SourceCheck.superseded.is_(False))
         .order_by(SourceCheck.id.desc())
         .limit(100)
         .all()
@@ -181,6 +181,7 @@ def factcheck_queue(db: Session = Depends(get_db), _: User = Depends(require_aut
         db.query(SourceCheck)
         .filter(
             SourceCheck.result == "possible_corroboration",
+            SourceCheck.superseded.is_(False),
             SourceCheck.detail.contains("Systematic review"),
         )
         .order_by(SourceCheck.id.desc())

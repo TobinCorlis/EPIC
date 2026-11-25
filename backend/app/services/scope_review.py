@@ -83,7 +83,11 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
 
     suggestions = (
         db.query(SourceCheck)
-        .filter(SourceCheck.claim_id == claim.id, SourceCheck.checker_name == "related_work")
+        .filter(
+            SourceCheck.claim_id == claim.id,
+            SourceCheck.checker_name == "related_work",
+            SourceCheck.superseded.is_(False),
+        )
         .all()
     )
     seen_suggestions = set()

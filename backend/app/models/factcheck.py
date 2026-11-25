@@ -1,11 +1,12 @@
-"""Immutable automated source checks and the queue that runs them.
+"""Automated source checks and the queue that runs them.
 
-A row in source_checks is an audit record. Nothing updates it. A later run
-appends another row. verification_status is not set from these rows.
+A row in source_checks is an audit record. A later run appends another row.
+A related-work lead can be marked superseded when a newer run replaces it or
+when it fails the relevance gate. The row stays for audit.
 """
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.clock import utcnow
@@ -35,6 +36,7 @@ class SourceCheck(Base):
     archive_timestamp: Mapped[str | None] = mapped_column(String(40), nullable=True)
     matched_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[str] = mapped_column(Text, default="")
+    superseded: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

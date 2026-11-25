@@ -118,35 +118,25 @@ def _entered(source: Source) -> dict:
     return {"title": source.title, "author": source.author, "year": year, "journal": source.publisher}
 
 
-def _matching_lead(db: Session, draft: dict) -> SourceCheck | None:
-    if draft.get("checker_name") != "related_work" or draft.get("claim_id") is None:
-        return None
-    query = db.query(SourceCheck).filter(
-        SourceCheck.checker_name == "related_work",
-        SourceCheck.claim_id == draft["claim_id"],
+def store_related_leads(db: Session, claim_id: int, drafts: list[dict]) -> list[SourceCheck]:
+    """Keep earlier leads for audit and mark them superseded. Insert the current set."""
+    previous = (
+        db.query(SourceCheck)
+        .filter(
+            SourceCheck.claim_id == claim_id,
+            SourceCheck.checker_name == "related_work",
+            SourceCheck.superseded.is_(False),
+        )
+        .all()
     )
-    if draft.get("response_id"):
-        return query.filter(SourceCheck.response_id == draft["response_id"]).order_by(SourceCheck.id).first()
-    if draft.get("evidence_url"):
-        return query.filter(SourceCheck.evidence_url == draft["evidence_url"]).order_by(SourceCheck.id).first()
-    return None
+    for row in previous:
+        row.superseded = True
+    return _persist(db, None, drafts)
 
 
 def _persist(db: Session, source_id: int | None, drafts: list[dict]) -> list[SourceCheck]:
     rows = []
     for draft in drafts:
-        existing = _matching_lead(db, draft)
-        if existing is not None:
-            existing.result = draft["result"]
-            existing.detail = draft.get("detail") or ""
-            existing.match_score = draft.get("match_score")
-            existing.query = draft["query"]
-            existing.api_name = draft["api_name"]
-            existing.checker_version = draft["checker_version"]
-            existing.evidence_url = draft.get("evidence_url")
-            existing.response_id = draft.get("response_id")
-            rows.append(existing)
-            continue
         row = SourceCheck(
             source_id=draft.get("source_id", source_id),
             claim_id=draft.get("claim_id"),
@@ -388,10 +378,9 @@ def run_claim_checks(db: Session, claim_id: int, transport=None, actor_id: int |
             text = extracted
     related = openalex_related(client, claim_body, claim_id) + pubmed_related(client, claim_body, claim_id)
     model = llm_check(client, claim_body, text, claim_id)
-    drafts = list(related)
+    rows.extend(store_related_leads(db, claim_id, related))
     if model is not None:
-        drafts.append(model)
-    rows.extend(_persist(db, None, drafts))
+        rows.extend(_persist(db, None, [model]))
     claim = db.get(Claim, claim_id)
     if claim is not None:
         review_claim_scope(db, claim)

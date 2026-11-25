@@ -37,6 +37,7 @@ class SourceCheckRead(BaseModel):
     archive_timestamp: str | None
     matched_snippet: str | None
     detail: str
+    superseded: bool = False
     created_at: datetime
 
 

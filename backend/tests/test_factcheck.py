@@ -615,7 +615,8 @@ def test_workspace_shows_the_verification_panel():
     assert "Re-run checks" in script
     assert "Verification queue" in page
     assert "Automated lookup of cited sources is not implemented" not in script
-    assert "app.js?v=23" in page
+    assert "app.js?v=24" in page
+    assert "Earlier leads" in script
     assert "The quoted text was not found in the accessible source text." in script
     assert "Attribution claim" in script
     assert "Source #" in script and "Existence" in script and "Archive" in script
@@ -766,6 +767,55 @@ def test_on_demand_check_is_an_auditable_job():
     assert match
 
 
+def test_old_off_topic_and_duplicate_leads_are_superseded_and_kept():
+    from app.services.factcheck.backfill import supersede_stale_leads
+
+    headers, _user_id = _user()
+    claim = _debate_claim("Most published research findings are false.")
+    with SessionLocal() as db:
+        db.add(SourceCheck(
+            claim_id=claim["id"],
+            checker_name="related_work",
+            checker_version="factcheck-v1",
+            api_name="api.openalex.org",
+            query="related old",
+            response_id="https://openalex.org/W-eeg",
+            result="possible_corroboration",
+            detail="Possible corroboration only. Title: EEG practice guidelines",
+        ))
+        db.add(SourceCheck(
+            claim_id=claim["id"],
+            checker_name="related_work",
+            checker_version="factcheck-v1",
+            api_name="api.openalex.org",
+            query="related old",
+            response_id="https://openalex.org/W-hit",
+            result="possible_corroboration",
+            detail="Possible corroboration only. Title: Why most published research findings are false",
+        ))
+        db.add(SourceCheck(
+            claim_id=claim["id"],
+            checker_name="related_work",
+            checker_version="factcheck-v1",
+            api_name="api.openalex.org",
+            query="related rerun",
+            response_id="https://openalex.org/W-hit",
+            result="possible_corroboration",
+            detail="Possible corroboration only. Title: Why most published research findings are false",
+        ))
+        db.commit()
+        supersede_stale_leads(db)
+        db.commit()
+    rows = client.get(f"/claims/{claim['id']}/checks").json()
+    eeg = next(row for row in rows if row["response_id"] == "https://openalex.org/W-eeg")
+    hits = [row for row in rows if row["response_id"] == "https://openalex.org/W-hit"]
+    assert eeg["superseded"] is True
+    assert len(hits) == 2
+    assert sum(1 for row in hits if row["superseded"]) == 1
+    assert sum(1 for row in hits if not row["superseded"]) == 1
+    assert len(rows) == 3
+
+
 def test_invalidation_actor_backfill_uses_the_recorded_user():
     from app.models.auth import User
     from app.models.evidence import Source
@@ -884,7 +934,9 @@ def test_related_work_rerun_updates_the_same_lead():
     client.post(f"/claims/{claim['id']}/checks", headers=headers)
     rows = client.get(f"/claims/{claim['id']}/checks").json()
     leads = [row for row in rows if row["checker_name"] == "related_work" and row["response_id"] == "https://openalex.org/W-same"]
-    assert len(leads) == 1
+    assert len(leads) == 2
+    assert sum(1 for row in leads if not row["superseded"]) == 1
+    assert sum(1 for row in leads if row["superseded"]) == 1
 
 
 def test_absent_quote_on_a_confirmed_doi_does_not_reach_supported():

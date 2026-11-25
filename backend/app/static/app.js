@@ -627,18 +627,23 @@ function sourceCheckSummary(checks) {
   }).join('');
 }
 
+function checkItem(check) {
+  const links = [];
+  if (check.evidence_url) links.push(`<a href="${esc(check.evidence_url)}">Record</a>`);
+  if (check.archive_url) links.push(`<a href="${esc(check.archive_url)}">Archive snapshot</a>`);
+  return `<li><b>${esc(check.checker_name)}</b> · ${esc(check.result)} · ${esc(formatWhen(check.created_at))}<div>${esc(check.detail || '')}</div>${check.matched_snippet ? `<div>Snippet: ${esc(check.matched_snippet)}</div>` : ''}<div>${links.join(' · ') || 'No external link recorded.'}</div></li>`;
+}
+
 function verificationPanel(checks, claimId) {
   const rows = checks || [];
-  const items = rows.length
-    ? rows.map(check => {
-      const links = [];
-      if (check.evidence_url) links.push(`<a href="${esc(check.evidence_url)}">Record</a>`);
-      if (check.archive_url) links.push(`<a href="${esc(check.archive_url)}">Archive snapshot</a>`);
-      return `<li><b>${esc(check.checker_name)}</b> · ${esc(check.result)} · ${esc(formatWhen(check.created_at))}<div>${esc(check.detail || '')}</div>${check.matched_snippet ? `<div>Snippet: ${esc(check.matched_snippet)}</div>` : ''}<div>${links.join(' · ') || 'No external link recorded.'}</div></li>`;
-    }).join('')
-    : '<li>No automated check has been recorded.</li>';
+  const current = rows.filter(check => !check.superseded);
+  const earlier = rows.filter(check => check.superseded);
+  const items = current.length ? current.map(checkItem).join('') : '<li>No current automated check has been recorded.</li>';
+  const history = earlier.length
+    ? `<details><summary>Earlier leads (${earlier.length})</summary><ul>${earlier.map(checkItem).join('')}</ul></details>`
+    : '';
   const button = claimId ? `<button type="button" data-rerun-claim="${claimId}">Re-run checks</button>` : '';
-  return `<div class="verification"><p><b>Verification</b></p>${sourceCheckSummary(rows)}<ul>${items}</ul>${button}</div>`;
+  return `<div class="verification"><p><b>Verification</b></p>${sourceCheckSummary(current)}<ul>${items}</ul>${history}${button}</div>`;
 }
 
 async function loadFactcheckQueue() {
