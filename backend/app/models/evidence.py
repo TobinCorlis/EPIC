@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SqlEnum, Float, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -59,6 +59,12 @@ class Source(Base):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     quality_score: Mapped[float] = mapped_column(Float, default=0.0)
     quality_rationale: Mapped[str] = mapped_column(Text, default="")
+    scope_population: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_timeframe: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_geography: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_study_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    scope_sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     citations = relationship("Citation", back_populates="source", cascade="all, delete-orphan")
@@ -86,6 +92,12 @@ class ClaimEvidence(Base):
     citation_id: Mapped[int] = mapped_column(ForeignKey("citations.id"), index=True)
     stance: Mapped[EvidenceStance] = mapped_column(SqlEnum(EvidenceStance))
     claim_supported: Mapped[str] = mapped_column(Text)
+    scope_population: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_timeframe: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_geography: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_study_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    scope_sample_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     relevance_score: Mapped[float] = mapped_column(Float, default=0.5)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

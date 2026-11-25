@@ -32,6 +32,7 @@ Not implemented:
 - Factual, inferential, and opinion claim classification
 - Automatic citation requirements for non-opinion claims
 - Rule-based review flags for pivot-style phrasing. These flags do not label a claim off-topic.
+- Rule-based scope flags. They compare the population, timeframe, geography, metric, and study type a user entered on the source, the evidence link, the claim, and the debate question. A flag means needs review. It does not reject the claim or label it off-topic. An outlier is flagged only when EPIC already has a recorded contradicting link on that claim.
 - Source, citation, and claim-evidence data models
 - Evidence stances: supports, contradicts, and contextualizes
 - Provisional source-quality scoring with written rationale
@@ -84,6 +85,8 @@ The stored formula is `tier_factor * track_factor * corroboration_factor * count
 - `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero.
 - `corroboration_factor` is the number of independent supporting sources, capped at 3, divided by 3.
 - `counter_factor` is 1 divided by 1 plus the number of independent contradicting sources whose challenge was not upheld. Upheld challenges refute that contrary evidence and it is reported, then excluded. Nothing outside the database is invented.
+
+Scope checks use only the population, timeframe, geography, metric, and study type a user entered, plus a few wording patterns (some stated as all, a correlation or observational study stated as causation, a city or state study stated as national). They do not read an external paper. A flag means needs review. It does not reject the claim. An outlier is flagged only when a contradicting link is already recorded on that claim. A near match on question text with a different entered scope is a different question.
 
 ## Structured argument workflow
 

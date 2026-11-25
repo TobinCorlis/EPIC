@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, DateTime, Enum as SqlEnum, ForeignKey, Text
+from sqlalchemy import Boolean, DateTime, Enum as SqlEnum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,6 +26,10 @@ class Claim(Base):
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     moderation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope_population: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_timeframe: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_geography: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    scope_metric: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     corrections = relationship("ClaimCorrection", back_populates="claim", cascade="all, delete-orphan")
