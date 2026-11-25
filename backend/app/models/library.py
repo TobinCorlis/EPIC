@@ -132,4 +132,8 @@ class UpstreamInvalidation(Base):
     reason: Mapped[str] = mapped_column(Text)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"), index=True)
     recorded_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    actor: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    reversed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reversed_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

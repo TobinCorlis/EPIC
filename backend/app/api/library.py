@@ -27,6 +27,7 @@ from app.schemas.library import (
     LibrarySourceBrief,
     LibraryVerificationBrief,
     LibraryVersionRead,
+    InvalidationReverse,
     PointResolve,
     ReevaluationCreate,
     ReevaluationDecision,
@@ -39,6 +40,7 @@ from app.services.reference_library import (
     latest_version,
     open_request,
     record_upstream_invalidation,
+    reverse_upstream_invalidation,
     resolve_point,
     search_entries,
 )
@@ -286,7 +288,30 @@ def post_invalidation(
         "reason": invalidation.reason,
         "source_id": invalidation.source_id,
         "recorded_by_user_id": invalidation.recorded_by_user_id,
+        "actor": invalidation.actor,
         "recorded_at": invalidation.recorded_at,
+    }
+
+
+@router.post("/invalidations/{invalidation_id}/reverse")
+def post_reverse_invalidation(
+    invalidation_id: int,
+    payload: InvalidationReverse,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_role(UserRole.moderator, UserRole.administrator)),
+):
+    from app.models.library import UpstreamInvalidation
+
+    invalidation = db.get(UpstreamInvalidation, invalidation_id)
+    if invalidation is None:
+        raise HTTPException(status_code=404, detail="Invalidation not found")
+    _guard(lambda: reverse_upstream_invalidation(db, invalidation, user, payload.reason))
+    db.commit()
+    return {
+        "id": invalidation.id,
+        "reversed_reason": invalidation.reversed_reason,
+        "reversed_by_user_id": invalidation.reversed_by_user_id,
+        "actor": invalidation.actor,
     }
 
 

@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+os.environ["FACTCHECK_AUTO_RUN"] = "false"
+
 TEST_DB = Path(__file__).parent / "test_suite_epic.db"
 if os.environ.get("EPIC_PYTEST_DATABASE_URL"):
     os.environ["DATABASE_URL"] = os.environ["EPIC_PYTEST_DATABASE_URL"]

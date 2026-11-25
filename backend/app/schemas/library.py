@@ -100,6 +100,10 @@ class InvalidationCreate(BaseModel):
     source_id: int
 
 
+class InvalidationReverse(BaseModel):
+    reason: str = Field(min_length=3)
+
+
 class LibrarySourceBrief(BaseModel):
     id: int
     title: str

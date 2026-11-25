@@ -71,23 +71,66 @@ function written(map, value) {
   return map[value] || (value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Not recorded');
 }
 
+const REVIEW_REASONS = {
+  no_record: 'The cited source has no findable record.',
+  quote_not_found: 'The quoted text was not found in the accessible source text.',
+  text_not_accessible: 'The source text could not be read.',
+  low_confidence: 'A title search was too weak to confirm the source.',
+  check_failed: 'An automated check failed.',
+  metadata_mismatch: 'The entered title, authors, year, or journal does not match the record.',
+  retraction: 'A retraction is recorded for a cited source.',
+  refuted: 'Stronger recorded evidence contradicts the claim.',
+  scope_flag: 'A scope or wording comparison needs review.',
+  moderation: 'A moderation rule flagged this claim.',
+};
+
+function reviewBadge(claim) {
+  if (!claim.needs_review) return '<span class="badge good">No review flag</span>';
+  const reasons = (claim.needs_review_reasons || []).map(code => REVIEW_REASONS[code] || code);
+  const text = reasons.length ? reasons.join(' ') : 'Flagged for review.';
+  return `<span class="badge warn">Flagged for review. ${esc(text)}</span>`;
+}
+
+function tierPhrase(item) {
+  if (item.tier_basis === 'automated check') {
+    return `tier ${esc(item.effective_tier)} (declared rank ${esc(item.tier_rank)} of 8, from an automated check)`;
+  }
+  if (item.tier_basis === 'reviewed') {
+    return `tier ${esc(item.effective_tier)} (reviewed rank ${esc(item.tier_rank)} of 8)`;
+  }
+  return `tier unknown (unreviewed declared type ${esc(item.declared_source_type || 'unknown')})`;
+}
+
+function tierChip(summary) {
+  if (!summary) return '';
+  if (summary.strongest_tier_basis === 'automated check') {
+    return `Strongest tier ${esc(summary.strongest_effective_tier)} (declared rank ${esc(summary.strongest_tier_rank)} of 8, from an automated check)`;
+  }
+  if (summary.strongest_tier_basis === 'reviewed') {
+    return `Strongest tier ${esc(summary.strongest_effective_tier)} (reviewed rank ${esc(summary.strongest_tier_rank)} of 8)`;
+  }
+  return `Strongest tier unknown (unreviewed)`;
+}
+
 function confidenceBlock(confidence) {
   if (!confidence) return '<p><b>Confidence:</b> Unknown – not yet rated</p>';
   if (confidence.not_factually_answerable) {
     return `<p><b>Not factually answerable.</b> This question has no factual answer. ${esc(confidence.answerability_reason || '')}</p>`;
   }
-  const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Rated');
+  const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Weakly supported');
+  const scoreBeside = confidence.confidence_score == null ? '' : ` (${formatFactor(confidence.confidence_score)})`;
   const factors = (confidence.factors || []).map(factor =>
     `<li><b>${esc(factor.name)}</b>: ${esc(formatFactor(factor.value))}. ${esc(factor.detail || '')}</li>`
   ).join('');
   const automated = confidence.automated_source_check
-    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'Automated lookup of cited sources is not implemented.')}</p>`
+    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'No automated source check has been recorded.')}</p>`
     : '';
   const missing = confidence.cited_source_note ? `<p>${esc(confidence.cited_source_note)}</p>` : '';
   const contradictions = (confidence.contradicting_sources || []).length
     ? `<p><b>Contradicting sources:</b> ${(confidence.contradicting_sources || []).map(source => esc(source.title || ('Source #' + source.id))).join(', ')}</p>`
     : '';
-  return `<div class="confidence"><p><b>Confidence:</b> ${esc(formatScore(confidence.confidence_score))}. <b>${esc(label)}</b></p>${missing}${contradictions}${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
+  const attribution = confidence.attribution_note ? `<p><b>Attribution:</b> ${esc(confidence.attribution_note)}</p>` : '';
+  return `<div class="confidence"><p><b>Confidence:</b> ${esc(formatScore(confidence.confidence_score))}. <b>${esc(label)}${scoreBeside}</b></p>${attribution}${missing}${contradictions}${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
 }
 
 function confidenceList(value) {
@@ -236,6 +279,7 @@ async function refresh() {
       ? dashboard.jobs.map(job => `<div class="item"><b>${esc(job.query)}</b><div class="muted">${esc(job.current_step)} · ${esc(job.status === 'not_implemented' ? 'not implemented' : job.status)}</div><div class="bar"><i style="width:${job.progress_percent}%"></i></div></div>`).join('')
       : '<p class="muted">No research jobs yet.</p>';
     refreshVerifiedClaims();
+    loadFactcheckQueue();
   } catch {
     localStorage.removeItem('epic_token');
     token = null;
@@ -321,7 +365,7 @@ function showPanel(id) {
     const selected = tab.id === 'tab-' + id;
     tab.setAttribute('aria-selected', selected ? 'true' : 'false');
   }
-  if (id === 'reviewPanel') refreshReviews();
+  if (id === 'reviewPanel') { refreshReviews(); loadFactcheckQueue(); }
   if (id === 'roomPanel') refreshRoom();
 }
 
@@ -382,6 +426,7 @@ async function addClaim() {
     const claim = await api(`/debates/${currentDebate.id}/claims`, {method: 'POST', body: JSON.stringify({
       body: $('claimBody').value,
       claim_type: $('claimType').value,
+      claim_role: $('claimRole').value,
       uncertainty: $('claimUncertainty').value || null,
       scope_population: $('claimPopulation').value || null,
       scope_timeframe: $('claimTimeframe').value || null,
@@ -413,11 +458,14 @@ async function refreshClaims() {
     const cards = await Promise.all(claims.map(async claim => {
       let summary = null;
       try { summary = await api(`/claims/${claim.id}/evidence-summary`); } catch { summary = null; }
+      let checks = [];
+      try { checks = await api(`/claims/${claim.id}/checks`); } catch { checks = []; }
       const links = (summary?.items || []).map(item => {
         const flags = (summary.scope_flags || []).filter(flag => flag.claim_evidence_id === item.claim_evidence_id);
-        return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · tier ${esc(item.effective_tier)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
+        return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · ${tierPhrase(item)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
       }).join('');
-      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
+      const roleLabel = claim.claim_role === 'attribution' ? 'Attribution claim' : 'Substantive claim';
+      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)} · ${esc(roleLabel)}</b>${reviewBadge(claim)}</div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>${tierChip(summary)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
     }));
     const present = new Set(claims.map(claim => claim.id));
     const extras = libraryClaims.filter(claim => !present.has(claim.id)).map(claim => `<article class="claim read-only"><b>Library claim #${claim.id}</b><p>${esc(claim.body)}</p><p>Read-only. Linked from library entry #${currentLibraryEntry.id}${currentLibraryEntry.stale ? '. Not the current answer.' : ''}.</p><p><a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p></article>`).join('');
@@ -573,6 +621,86 @@ function showProduct(which) {
   $('tabFactual').setAttribute('aria-selected', factual ? 'true' : 'false');
   $('tabFable').setAttribute('aria-selected', factual ? 'false' : 'true');
   if (!factual) { loadFables(); loadRefereeQueue(); }
+  else loadFactcheckQueue();
+}
+
+function latestCheck(rows, names) {
+  const matches = rows.filter(check => names.includes(check.checker_name));
+  return matches.length ? matches[matches.length - 1] : null;
+}
+
+function sourceCheckSummary(checks) {
+  const grouped = new Map();
+  for (const check of checks || []) {
+    if (!check.source_id) continue;
+    if (!grouped.has(check.source_id)) grouped.set(check.source_id, []);
+    grouped.get(check.source_id).push(check);
+  }
+  if (!grouped.size) return '';
+  return [...grouped.entries()].map(([sourceId, rows]) => {
+    const existence = latestCheck(rows, ['crossref', 'pubmed', 'openalex', 'federal_register', 'govinfo', 'courtlistener']);
+    const metadata = latestCheck(rows, ['metadata']);
+    const retraction = latestCheck(rows, ['retraction', 'notice']);
+    const url = latestCheck(rows, ['url']);
+    const archive = latestCheck(rows, ['wayback', 'save_page_now']);
+    const line = (label, check) => `<li><b>${label}:</b> ${check ? `${esc(check.result)}${check.http_status ? ` · HTTP ${esc(check.http_status)}` : ''}${check.evidence_url ? ` · <a href="${esc(check.evidence_url)}">Record</a>` : ''}${check.archive_url ? ` · <a href="${esc(check.archive_url)}">Archive snapshot</a>` : ''}` : 'not recorded'}</li>`;
+    return `<div><p><b>Source #${esc(sourceId)} checks</b></p><ul>${line('Existence', existence)}${line('Metadata', metadata)}${line('Retraction', retraction)}${line('URL', url)}${line('Archive', archive)}</ul></div>`;
+  }).join('');
+}
+
+function checkItem(check) {
+  const links = [];
+  if (check.evidence_url) links.push(`<a href="${esc(check.evidence_url)}">Record</a>`);
+  if (check.archive_url) links.push(`<a href="${esc(check.archive_url)}">Archive snapshot</a>`);
+  return `<li><b>${esc(check.checker_name)}</b> · ${esc(check.result)} · ${esc(formatWhen(check.created_at))}<div>${esc(check.detail || '')}</div>${check.matched_snippet ? `<div>Snippet: ${esc(check.matched_snippet)}</div>` : ''}<div>${links.join(' · ') || 'No external link recorded.'}</div></li>`;
+}
+
+function verificationPanel(checks, claimId) {
+  const rows = checks || [];
+  const current = rows.filter(check => !check.superseded);
+  const earlier = rows.filter(check => check.superseded);
+  const items = current.length ? current.map(checkItem).join('') : '<li>No current automated check has been recorded.</li>';
+  const history = earlier.length
+    ? `<details><summary>Earlier checks (${earlier.length})</summary><ul>${earlier.map(checkItem).join('')}</ul></details>`
+    : '';
+  const button = claimId ? `<button type="button" data-rerun-claim="${claimId}">Re-run checks</button>` : '';
+  return `<div class="verification"><p><b>Verification</b></p>${sourceCheckSummary(current)}<ul>${items}</ul>${history}${button}</div>`;
+}
+
+async function loadFactcheckQueue() {
+  const target = $('factcheckQueue');
+  const review = $('factcheckQueueReview');
+  if (!target && !review) return;
+  try {
+    const rows = await api('/factcheck/queue');
+    const html = rows.length
+      ? rows.map(check => {
+        const source = check.source_title
+          ? `${esc(check.source_title)}${check.source_locator ? ` · ${esc(check.source_locator)}` : ''}`
+          : `source ${esc(check.source_id ?? 'none')}`;
+        const claim = check.claim_id ? `claim ${esc(check.claim_id)}` : 'no claim recorded';
+        return `<article class="item"><b>${esc(check.result)}</b> · ${esc(check.checker_name)} · ${source} · ${claim}<div>${esc(check.detail || '')}</div><div>${esc(formatWhen(check.created_at))}</div>${check.evidence_url ? `<div><a href="${esc(check.evidence_url)}">Record</a></div>` : ''}${check.archive_url ? `<div><a href="${esc(check.archive_url)}">Archive snapshot</a></div>` : ''}${check.source_id ? `<button type="button" data-rerun-source="${check.source_id}">Re-run checks</button>` : ''}</article>`;
+      }).join('')
+      : '<p class="muted">No flagged checks.</p>';
+    if (target) target.innerHTML = html;
+    if (review) review.innerHTML = html;
+  } catch (error) {
+    const html = `<p class="error">${esc(error.message)}</p>`;
+    if (target) target.innerHTML = html;
+    if (review) review.innerHTML = html;
+  }
+}
+
+async function rerunSourceChecks(sourceId) {
+  await api(`/sources/${sourceId}/checks`, {method: 'POST', body: '{}'});
+  await loadFactcheckQueue();
+  if (currentDebate) await refreshClaims();
+}
+
+async function rerunClaimChecks(claimId) {
+  await api(`/claims/${claimId}/checks`, {method: 'POST', body: '{}'});
+  if (currentDebate) await refreshClaims();
+  await loadFactcheckQueue();
 }
 
 async function createFable() {
@@ -659,6 +787,10 @@ async function runFableReferee(id) { try { const result = await api(`/fable/matc
 document.body.addEventListener('click', event => {
   const fableButton = event.target.closest('[data-open-fable]');
   if (fableButton) openFable(Number(fableButton.dataset.openFable));
+  const rerunSource = event.target.closest('[data-rerun-source]');
+  if (rerunSource) rerunSourceChecks(Number(rerunSource.dataset.rerunSource));
+  const rerunClaim = event.target.closest('[data-rerun-claim]');
+  if (rerunClaim) rerunClaimChecks(Number(rerunClaim.dataset.rerunClaim));
   const debateButton = event.target.closest('[data-open-debate]');
   if (debateButton) openWorkspace({id: Number(debateButton.dataset.openDebate)});
   const entryButton = event.target.closest('[data-open-entry]');

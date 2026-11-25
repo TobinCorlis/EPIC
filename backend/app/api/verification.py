@@ -60,6 +60,14 @@ def create_verification_event(
     db: Session = Depends(get_db),
     user: User = Depends(require_authenticated),
 ):
+    if payload.result_status == RecordedVerificationStatus.verified and payload.subject_type == VerificationSubject.source:
+        from app.services.factcheck.status import findability_for_source, has_retraction
+
+        if has_retraction(db, payload.subject_id) or findability_for_source(db, payload.subject_id) != "found":
+            raise HTTPException(
+                status_code=409,
+                detail="Automated checks have not passed. The source cannot be marked verified.",
+            )
     if payload.result_status == RecordedVerificationStatus.verified and payload.subject_type != VerificationSubject.source:
         from app.models.claim import Claim
         from app.services.claim_confidence import SUPPORT_RULE, support_qualifies
@@ -72,6 +80,25 @@ def create_verification_event(
                     claim.needs_review = True
             db.commit()
             raise HTTPException(status_code=409, detail=SUPPORT_RULE)
+        from app.models.evidence import Citation, ClaimEvidence
+        from app.services.factcheck.status import findability_for_source, has_retraction
+
+        source_ids = {
+            row[0]
+            for row in (
+                db.query(Citation.source_id)
+                .join(ClaimEvidence, ClaimEvidence.citation_id == Citation.id)
+                .filter(ClaimEvidence.claim_id.in_(claim_ids or [0]))
+                .all()
+            )
+        }
+        for source_id in source_ids:
+            status_name = findability_for_source(db, source_id)
+            if has_retraction(db, source_id) or status_name in {"not_findable", "check_failed", "low_confidence"}:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Automated checks have not passed. The claim cannot be marked verified.",
+                )
     _apply_status(db, payload)
     event = VerificationEvent(
         subject_type=payload.subject_type,

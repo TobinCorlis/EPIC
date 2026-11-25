@@ -21,6 +21,22 @@ class Settings(BaseSettings):
     referee_llm_base_url: str = ""
     referee_llm_api_key: str = ""
     referee_llm_model: str = ""
+    factcheck_contact_email: str = "factcheck@epic.local"
+    factcheck_timeout_seconds: float = 10.0
+    factcheck_retries: int = 2
+    factcheck_min_interval_seconds: float = 1.0
+    factcheck_cache_hours: int = 24
+    factcheck_recheck_days: int = 30
+    factcheck_save_page_now: bool = False
+    factcheck_auto_run: bool = True
+    factcheck_llm_base_url: str = ""
+    factcheck_llm_api_key: str = ""
+    factcheck_llm_model: str = ""
+    courtlistener_api_token: str = ""
+    govinfo_api_key: str = ""
+    support_score_threshold: float = 0.6
+    factcheck_lead_min_overlap: float = 0.25
+    factcheck_lead_limit: int = 3
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("allowed_origins", "trusted_hosts", mode="before")

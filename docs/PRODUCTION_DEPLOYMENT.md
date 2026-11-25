@@ -7,6 +7,7 @@ Run three independently restartable components:
 1. **Web API** — FastAPI/Uvicorn behind an HTTPS reverse proxy or managed load balancer.
 2. **PostgreSQL** — persistent relational storage.
 3. **Research worker** — `python -m app.services.research_worker`. The process is durable, but automated research is not implemented: a claimed job is marked `not_implemented` and is not given a result summary.
+4. **Fact-check worker** — `python -m app.services.factcheck_worker`. It runs queued source and claim checks. Set `FACTCHECK_CONTACT_EMAIL`. Optional: `FACTCHECK_LLM_BASE_URL`, `FACTCHECK_LLM_API_KEY`, `FACTCHECK_LLM_MODEL`, `COURTLISTENER_API_TOKEN`, `GOVINFO_API_KEY`, and `FACTCHECK_SAVE_PAGE_NOW`. A network failure is stored as `check_failed` and does not mark the source verified.
 
 ## Required production settings
 

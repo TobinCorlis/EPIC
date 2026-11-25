@@ -79,6 +79,38 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
         if _NATIONAL.search(claim.body) and _LOCAL.search(geography):
             add("overgeneralization", "geography", geography, claim.body, link.id)
 
+    from app.models.factcheck import SourceCheck
+
+    suggestions = (
+        db.query(SourceCheck)
+        .filter(
+            SourceCheck.claim_id == claim.id,
+            SourceCheck.checker_name == "related_work",
+            SourceCheck.superseded.is_(False),
+        )
+        .all()
+    )
+    seen_suggestions = set()
+    for check in suggestions:
+        if "Systematic review" not in (check.detail or ""):
+            continue
+        key = check.evidence_url or check.response_id or str(check.id)
+        if key in seen_suggestions:
+            continue
+        seen_suggestions.add(key)
+        flags.append(ScopeReviewFlag(
+            claim_id=claim.id,
+            claim_evidence_id=None,
+            kind="consensus_suggestion",
+            dimension="literature",
+            source_text=check.evidence_url or check.response_id or "",
+            claim_text=claim.body,
+            note=(
+                "Suggestion only. An automated search returned a systematic review or meta-analysis. "
+                "It is not linked evidence and does not change the score."
+            ),
+        ))
+
     supporting = [link for link in links if link.stance == EvidenceStance.supports]
     contradicting = [link for link in links if link.stance == EvidenceStance.contradicts]
     if len(supporting) == 1 and contradicting:
@@ -93,6 +125,7 @@ def review_claim_scope(db: Session, claim: Claim) -> list[ScopeReviewFlag]:
     db.query(ScopeReviewFlag).filter(ScopeReviewFlag.claim_id == claim.id).delete()
     for flag in flags:
         db.add(flag)
-    if flags:
-        claim.needs_review = True
+    from app.services.claim_confidence import merge_review_reason
+
+    merge_review_reason(claim, "scope_flag", bool(flags))
     return flags

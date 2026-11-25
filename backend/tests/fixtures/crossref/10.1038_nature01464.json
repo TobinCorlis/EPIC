@@ -1,0 +1,74 @@
+{
+  "message": {
+    "DOI": "10.1038/nature01464",
+    "title": [
+      "Retraction Note to: Self-assembled monolayer organic field-effect transistors"
+    ],
+    "author": [
+      {
+        "given": "Jan Hendrik",
+        "family": "Sch\u00f6n"
+      },
+      {
+        "given": "Hong",
+        "family": "Meng"
+      },
+      {
+        "given": "Zhenan",
+        "family": "Bao"
+      }
+    ],
+    "issued": {
+      "date-parts": [
+        [
+          2003,
+          3
+        ]
+      ]
+    },
+    "container-title": [
+      "Nature"
+    ],
+    "update-to": [
+      {
+        "DOI": "10.1038/35099520",
+        "type": "retraction",
+        "label": "Retraction",
+        "source": "retraction-watch",
+        "updated": {
+          "date-parts": [
+            [
+              2003,
+              3,
+              6
+            ]
+          ],
+          "date-time": "2003-03-06T00:00:00Z",
+          "timestamp": 1046908800000
+        },
+        "record-id": "2111"
+      },
+      {
+        "DOI": "10.1038/35099520",
+        "type": "retraction",
+        "label": "Retraction",
+        "source": "publisher",
+        "updated": {
+          "date-parts": [
+            [
+              2003,
+              3,
+              6
+            ]
+          ],
+          "date-time": "2003-03-06T00:00:00Z",
+          "timestamp": 1046908800000
+        }
+      }
+    ],
+    "updated-by": null,
+    "relation": {},
+    "type": "journal-article",
+    "publisher": "Springer Science and Business Media LLC"
+  }
+}

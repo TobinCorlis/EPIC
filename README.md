@@ -77,18 +77,21 @@ pytest -q
 
 Evidence is listed item by item. A self-declared source type stays unverified, and is ranked as unknown, until a moderator or administrator reviews it. Reviewed items are ordered by evidence tier. Items from the same publisher, host, or document count as one independent source. EPIC does not add item scores together, and publisher or author text does not add points.
 
-Claim confidence is a 0–1 score with a label. It is not a verification. Automated lookup of cited sources, and automated contradiction search, are not implemented and are reported as `not_implemented`. A person records whether a cited source was found. Status changes come from that review, from a tier review, or from a recorded verification event.
+Claim confidence is a 0–1 score with a label. It is not a verification. Automated checks record whether a cited source was found, whether a quote appears in the accessible text, and which related works a reviewer might read. A failed check is `check_failed`, not a verification and not a missing record. A source the lookups do not find is `not_findable` and scores 0 / Unsupported when the claim rests only on it. Candidate corroboration and counterevidence do not change the label. A person still records tier review, and `verified` is still a separate human event.
 
 The rules, in order, are:
 
-- No supporting evidence, or a cited source with no findable record, scores 0 and is labeled Unsupported. The missing citation is stored as `cited source: no record found`.
+- No supporting evidence, or a cited source with no findable record, scores 0 and is labeled Unsupported. The missing citation is stored as `cited source: no record found`. A passing automated existence check — the identifier resolved, the entered metadata matches, and the work is not retracted — satisfies that record-found gate. Its provenance is `automated check`. A fetched URL with HTTP 200 counts as found for that URL. A weak OpenAlex title match does not override it, and OpenAlex title search runs only when the source has no DOI, PMID, or URL.
 - A claim contradicted by stronger, independent, reviewed evidence scores 0 and is labeled Refuted. The contradicting sources are listed. A weaker or non-independent source does not force that label.
-- Supported and Verified require recorded supporting evidence whose tier a person has reviewed. Otherwise the status is blocked or downgraded and the claim or library entry is flagged for review. `verified` still requires a recorded verification event by a named person, with the method and the archive URL or snapshot that was checked.
-- `Unknown – not yet rated` is used only when a person has found the record and the tier has not been reviewed. It is not used for a missing or fabricated citation.
+- Supported requires a score of at least 0.6 (`SUPPORT_SCORE_THRESHOLD`) and the evidence gate. A score above 0 and below that threshold is Weakly supported. The score is shown next to the label. A low score never carries Supported.
+- A quote found in a source verifies attribution: the source contains that text. It does not establish that a substantive claim is true. An attribution claim ("source S says X") can reach Supported from that quote in one found, non-retracted source when the score is at least 0.6. A substantive claim ("X") cannot reach Supported from one source alone. One source quoting itself is not independent corroboration.
+- A found source whose quoted text is not in the accessible text stays below Supported and is flagged. It is not labeled Unsupported. `verified` still requires a moderator and a recorded verification event, with the method and the archive URL or snapshot that was checked. Automated checks count as real checks for scoring. They do not by themselves mark a source verified.
+- A retraction sets that source's track factor to 0 and records an upstream invalidation. The worker records the actor as `system:factcheck`. A moderator can reverse that invalidation with a reason. The reversal does not restore verified.
+- `Unknown – not yet rated` is used when the record was found and the tier has not been reviewed, and support has not been established by a matching quote. It is not used for a missing or fabricated citation.
 - Otherwise the stored formula is `tier_factor * track_factor * corroboration_factor * counter_factor`. Factors are rounded to two decimals.
 
 - `tier_factor` is the strongest supporting source's reviewed tier rank divided by 8. An unreviewed declared type contributes as unknown, not as the declared tier. Tiers are not summed.
-- `track_factor` is that source's confirmed count divided by confirmed plus corrected, retracted, and found-false counts already stored in EPIC. No record is unknown and is left out of the product. It is not scored as zero.
+- `track_factor` counts only events about the source: a publisher correction or erratum, a retraction, or a claim from that source found false by an upheld challenge. A correction to the wording of an EPIC claim is not one of those events. When none of them is recorded, the factor is unknown and is left out of the product. It is not a multiplier of zero. A recorded retraction that has not been reversed makes the factor 0.
 - `corroboration_factor` is the number of independent supporting sources, capped at 3, divided by 3.
 - `counter_factor` is 1 divided by 1 plus the number of independent contradicting sources whose challenge was not upheld. Upheld challenges refute that contrary evidence and it is reported, then excluded. Nothing outside the database is invented.
 
@@ -100,9 +103,35 @@ Credibility is judged only on checkable evidence for the claim: whether the data
 
 A question marked not factually answerable — fiction, pure opinion, or a hypothetical such as which fictional crew would win — has no confidence score and no Supported or Refuted label. The page says the question has no factual answer. A factual sub-claim can still be scored. That question is not stored in or reused from the factual reference library.
 
+## Automated fact checking
+
+Checks run when a source is added or edited, when a citation or evidence link is added, on demand from `POST /sources/{id}/checks` or `POST /claims/{id}/checks`, and on a periodic re-check. The worker is `python -m app.services.factcheck_worker`. Every check is an immutable row: checker name and version, API, query, response id, and timestamp.
+
+What is checked:
+
+- A DOI is looked up at Crossref. Title, authors, year, and journal are compared with the fields that were entered. A mismatch is flagged. The work is still recorded as found.
+- A PMID is looked up in PubMed. The same metadata comparison applies. Retraction, erratum, and expression-of-concern publication types are recorded.
+- OpenAlex title search runs only when the source has no DOI, no PMID, and no URL. A match score under 0.72 is `low_confidence` and does not override a URL that returned HTTP 200.
+- Crossref `update-to` on a record means that record updates or retracts the target DOI. `updated-by`, and a relation such as `retraction` whose target is another DOI, means this record is the one that was retracted or corrected. A retraction notice is recorded as `retraction_notice` and does not start the cascade or zero the track record. A retraction of this record starts the upstream invalidation cascade and updates the source track record. The same cascade is not run twice for one source. An auto-created notice source uses the Crossref title.
+- A URL is fetched. The row stores HTTP status, final URL, content type, retrieval time, and a content hash. The Internet Archive availability API is queried. `archived` is recorded only when a snapshot URL and timestamp come back, and only then are `archive_url` and `archived_at` set. Save Page Now runs only when `FACTCHECK_SAVE_PAGE_NOW` is true, and only a successful capture is stored.
+- Federal Register, govinfo, and CourtListener adapters run when their identifier is present. govinfo uses `GOVINFO_API_KEY` when set. CourtListener uses `COURTLISTENER_API_TOKEN` when set. A 401 or 403 is `check_failed`, not a missing record.
+- A citation excerpt is compared with fetched HTML, or with PDF text from pypdf or `pdftotext`. Results are found, not found in the accessible text, or text not accessible. Not found lowers the rated score by half and flags review. It does not label the claim Refuted. Inaccessible text is not treated as absence.
+- OpenAlex and PubMed are searched for related work. A lead is stored only when its title overlaps the claim above `FACTCHECK_LEAD_MIN_OVERLAP` (default 0.25). OpenAlex relevance cannot rescue an off-topic title. At most `FACTCHECK_LEAD_LIMIT` leads are kept, labeled by topic-match strength. Anything below the threshold is not stored as a lead; the raw response stays in the HTTP cache. A stored lead is still not linked evidence and does not change the score.
+- If `FACTCHECK_LLM_BASE_URL`, `FACTCHECK_LLM_API_KEY`, and `FACTCHECK_LLM_MODEL` are set, a model may rate the claim against the fetched text only. The rating is kept only when its quote is an exact span of that text. Otherwise the rating is discarded. The deterministic checks still run with no model configured.
+
+What is not checked, and what a check does not do:
+
+- A check never sets `verified`. Marking a source verified requires a recorded existence check that found the work and no retraction. Marking a claim or argument verified is blocked when a supporting source's latest check is not findable, failed, low confidence, or a retraction. If no automated check has been stored yet, the existing human evidence rules still apply, and the panel says the check has not been recorded.
+- A network failure, timeout, or 5xx is `check_failed`. It is not verified and it is not not-findable.
+- Candidate papers are not counterevidence in the score. Only a reviewed, linked contradicting source can refute a claim.
+- Paywalled, scanned, or otherwise unreadable text is not treated as a quote that is absent.
+- The research-job worker still records `not_implemented`. It does not search the literature or finish a research question.
+- An AI matchup run in EPIC FABLE is still not implemented.
+- EPIC does not invent a citation, an archive snapshot, or a passage that was not returned.
+
 ## EPIC FABLE
 
-EPIC FABLE (Fictional Analysis Based on Lore Evidence) is walled off from the factual record. Lore is not evidence and does not appear in factual search or reuse. A matchup is either an AI matchup or a personal-knowledge debate. An AI matchup run is not implemented. In a debate, the debaters supply each power or feat and its canon citation. The referee rules only those moves as Allowed, Disallowed, or Unverified, and does not coach, suggest powers, answer questions, or introduce a counter the debater did not raise. Automated AI refereeing is not implemented. A moderator can rule by hand. Debate outcomes and AI matchup outcomes are stored separately and do not overwrite each other. A side that never raises a valid canon counter can lose. EPIC cannot fully prevent a debater from consulting material outside the room.
+EPIC FABLE (Fictional Analysis Based on Lore Evidence) is walled off from the factual record. Lore is not evidence and does not appear in factual search or reuse. A matchup is either an AI matchup or a personal-knowledge debate. An AI matchup run is not implemented. In a debate, the debaters supply each power or feat and its canon citation. The referee rules only those moves as Allowed, Disallowed, or Unverified, and does not coach, suggest powers, answer questions, or introduce a counter the debater did not raise. A moderator can accept, override, or re-check a ruling. Debate outcomes and AI matchup outcomes are stored separately and do not overwrite each other. A side that never raises a valid canon counter can lose. EPIC cannot fully prevent a debater from consulting material outside the room.
 
 ## Reference library
 

@@ -114,6 +114,7 @@ class EvidenceItemRead(BaseModel):
     source_type_reviewed: bool
     effective_tier: str
     tier_rank: int
+    tier_basis: str = "unreviewed"
     independence_key: str
     claim_supported: str
     source_id: int | None = None
@@ -144,6 +145,10 @@ class ConfidenceAssessmentRead(BaseModel):
     factors: list[ConfidenceFactorRead]
     automated_source_check: str
     automated_source_check_detail: str
+    attribution_verified: bool = False
+    attribution_note: str | None = None
+    support_threshold: float | None = None
+    claim_role: str | None = None
 
 
 class ScopeFlagRead(BaseModel):
@@ -162,6 +167,8 @@ class ClaimEvidenceSummary(BaseModel):
     claim_id: int
     items: list[EvidenceItemRead]
     strongest_effective_tier: str
+    strongest_tier_basis: str = "unreviewed"
+    strongest_tier_rank: int = 0
     independent_source_count: int
     citation_count: int
     citation_requirement_met: bool

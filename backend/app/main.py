@@ -17,6 +17,8 @@ from app.api.verification import router as verification_router
 from app.api.corrections import router as corrections_router
 from app.api.library import router as library_router
 from app.api.fable import router as fable_router
+from app.api.factcheck import router as factcheck_router
+import app.models.factcheck  # noqa: F401
 from app.core.config import settings
 from app.core.database import Base, database_ready, engine
 
@@ -67,6 +69,7 @@ app.include_router(verification_router)
 app.include_router(corrections_router)
 app.include_router(library_router)
 app.include_router(fable_router)
+app.include_router(factcheck_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

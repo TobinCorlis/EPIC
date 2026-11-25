@@ -78,6 +78,7 @@ class EvidenceItem:
     source_type_reviewed: bool
     effective_tier: str
     tier_rank: int
+    tier_basis: str
     independence_key: str
     claim_supported: str
 
@@ -86,17 +87,29 @@ class EvidenceItem:
 class EvidenceSummary:
     items: list[EvidenceItem]
     strongest_effective_tier: str
+    strongest_tier_basis: str
+    strongest_tier_rank: int
     independent_source_count: int
     citation_count: int
 
 
-def summarize_evidence(links: list) -> EvidenceSummary:
+def summarize_evidence(links: list, confirmed_source_ids: set[int] | None = None) -> EvidenceSummary:
+    confirmed_source_ids = confirmed_source_ids or set()
     items: list[EvidenceItem] = []
     for link in links:
         source = link.citation.source
         declared = source.source_type if isinstance(source.source_type, SourceType) else SourceType(source.source_type)
         reviewed = bool(getattr(source, "source_type_reviewed", False))
-        effective = effective_source_type(declared, reviewed)
+        confirmed = source.id in confirmed_source_ids
+        if reviewed:
+            effective = declared
+            basis = "reviewed"
+        elif confirmed:
+            effective = declared
+            basis = "automated check"
+        else:
+            effective = SourceType.unknown
+            basis = "unreviewed"
         stance = link.stance.value if isinstance(link.stance, EvidenceStance) else str(link.stance)
         items.append(
             EvidenceItem(
@@ -106,16 +119,19 @@ def summarize_evidence(links: list) -> EvidenceSummary:
                 source_type_reviewed=reviewed,
                 effective_tier=effective.value,
                 tier_rank=TIER_RANK[effective],
+                tier_basis=basis,
                 independence_key=independence_key(source),
                 claim_supported=getattr(link, "claim_supported", "") or "",
             )
         )
     items.sort(key=lambda item: (-item.tier_rank, item.claim_evidence_id))
-    strongest = items[0].effective_tier if items else SourceType.unknown.value
+    strongest = items[0] if items else None
     independent = len({item.independence_key for item in items})
     return EvidenceSummary(
         items=items,
-        strongest_effective_tier=strongest,
+        strongest_effective_tier=strongest.effective_tier if strongest else SourceType.unknown.value,
+        strongest_tier_basis=strongest.tier_basis if strongest else "unreviewed",
+        strongest_tier_rank=strongest.tier_rank if strongest else 0,
         independent_source_count=independent,
         citation_count=len(items),
     )
