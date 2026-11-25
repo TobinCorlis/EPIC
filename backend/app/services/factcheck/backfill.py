@@ -61,3 +61,47 @@ def supersede_stale_leads(session: Session) -> None:
         for older in group[:-1]:
             older.superseded = True
     session.flush()
+
+
+def supersede_older_checks(session: Session) -> None:
+    """Keep the latest check of each type and fill quote rows with their claim."""
+    from app.models.evidence import ClaimEvidence
+    from app.models.factcheck import SourceCheck
+
+    quotes = (
+        session.query(SourceCheck)
+        .filter(
+            SourceCheck.checker_name == "quote",
+            SourceCheck.claim_id.is_(None),
+            SourceCheck.citation_id.is_not(None),
+        )
+        .all()
+    )
+    for quote in quotes:
+        link = (
+            session.query(ClaimEvidence.claim_id)
+            .filter(ClaimEvidence.citation_id == quote.citation_id)
+            .order_by(ClaimEvidence.id)
+            .first()
+        )
+        if link is not None:
+            quote.claim_id = link[0]
+    session.flush()
+    current = (
+        session.query(SourceCheck)
+        .filter(SourceCheck.superseded.is_(False))
+        .order_by(SourceCheck.id)
+        .all()
+    )
+    groups: dict[tuple, list] = {}
+    for row in current:
+        if row.checker_name == "related_work":
+            key = (row.source_id, row.claim_id, row.citation_id, row.checker_name, row.response_id or row.evidence_url)
+        else:
+            key = (row.source_id, row.claim_id, row.citation_id, row.checker_name)
+        groups.setdefault(key, []).append(row)
+    for group in groups.values():
+        group.sort(key=lambda item: item.id)
+        for older in group[:-1]:
+            older.superseded = True
+    session.flush()

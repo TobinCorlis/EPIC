@@ -135,6 +135,20 @@ def store_related_leads(db: Session, claim_id: int, drafts: list[dict]) -> list[
 
 
 def _persist(db: Session, source_id: int | None, drafts: list[dict]) -> list[SourceCheck]:
+    """Insert the new rows and supersede the previous row of the same check."""
+    for draft in drafts:
+        source = draft.get("source_id", source_id)
+        claim_id = draft.get("claim_id")
+        citation_id = draft.get("citation_id")
+        query = db.query(SourceCheck).filter(
+            SourceCheck.checker_name == draft["checker_name"],
+            SourceCheck.superseded.is_(False),
+        )
+        query = query.filter(SourceCheck.source_id.is_(None) if source is None else SourceCheck.source_id == source)
+        query = query.filter(SourceCheck.claim_id.is_(None) if claim_id is None else SourceCheck.claim_id == claim_id)
+        query = query.filter(SourceCheck.citation_id.is_(None) if citation_id is None else SourceCheck.citation_id == citation_id)
+        for older in query.all():
+            older.superseded = True
     rows = []
     for draft in drafts:
         row = SourceCheck(
@@ -268,7 +282,7 @@ def _notice_source(db: Session, source: Source, response_id: str | None, notice_
     return notice
 
 
-def _collect_drafts(client, source: Source, excerpts: list[tuple[int, str]]) -> tuple[list[dict], dict | None]:
+def _collect_drafts(client, source: Source, excerpts: list[tuple[int, str, int | None]]) -> tuple[list[dict], dict | None]:
     """Network only. The caller must not be holding a database write transaction."""
     entered = _entered(source)
     doi = extract_doi(source.url, source.document_reference)
@@ -301,8 +315,8 @@ def _collect_drafts(client, source: Source, excerpts: list[tuple[int, str]]) -> 
         saved = save_page_check(client, source.url)
         if saved is not None:
             drafts.append(saved)
-    for citation_id, excerpt in excerpts:
-        drafts.append(quote_checks(excerpt, citation_id, body, content_type, http_status))
+    for citation_id, excerpt, claim_id in excerpts:
+        drafts.append(quote_checks(excerpt, citation_id, body, content_type, http_status, claim_id))
     notice_meta = None
     retraction = next((draft for draft in drafts if draft.get("result") == "retracted" and str(draft.get("response_id") or "").startswith("10.")), None)
     if retraction is not None:
@@ -314,11 +328,18 @@ def run_source_checks(db: Session, source_id: int, transport=None, actor_id: int
     source = db.get(Source, source_id)
     if source is None:
         return []
-    excerpts = [
-        (citation.id, citation.excerpt)
-        for citation in db.query(Citation).filter(Citation.source_id == source.id).all()
-        if citation.excerpt
-    ]
+    excerpts = []
+    for citation in db.query(Citation).filter(Citation.source_id == source.id).all():
+        if not citation.excerpt:
+            continue
+        claim_ids = [
+            row[0]
+            for row in db.query(ClaimEvidence.claim_id).filter(ClaimEvidence.citation_id == citation.id).all()
+        ]
+        if not claim_ids:
+            excerpts.append((citation.id, citation.excerpt, None))
+        else:
+            excerpts.extend((citation.id, citation.excerpt, claim_id) for claim_id in claim_ids)
     db.commit()
     client = transport or get_transport()
     drafts, notice_meta = _collect_drafts(client, source, excerpts)

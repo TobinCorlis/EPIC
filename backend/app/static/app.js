@@ -91,6 +91,27 @@ function reviewBadge(claim) {
   return `<span class="badge warn">Flagged for review. ${esc(text)}</span>`;
 }
 
+function tierPhrase(item) {
+  if (item.tier_basis === 'automated check') {
+    return `tier ${esc(item.effective_tier)} (declared rank ${esc(item.tier_rank)} of 8, from an automated check)`;
+  }
+  if (item.tier_basis === 'reviewed') {
+    return `tier ${esc(item.effective_tier)} (reviewed rank ${esc(item.tier_rank)} of 8)`;
+  }
+  return `tier unknown (unreviewed declared type ${esc(item.declared_source_type || 'unknown')})`;
+}
+
+function tierChip(summary) {
+  if (!summary) return '';
+  if (summary.strongest_tier_basis === 'automated check') {
+    return `Strongest tier ${esc(summary.strongest_effective_tier)} (declared rank ${esc(summary.strongest_tier_rank)} of 8, from an automated check)`;
+  }
+  if (summary.strongest_tier_basis === 'reviewed') {
+    return `Strongest tier ${esc(summary.strongest_effective_tier)} (reviewed rank ${esc(summary.strongest_tier_rank)} of 8)`;
+  }
+  return `Strongest tier unknown (unreviewed)`;
+}
+
 function confidenceBlock(confidence) {
   if (!confidence) return '<p><b>Confidence:</b> Unknown – not yet rated</p>';
   if (confidence.not_factually_answerable) {
@@ -441,10 +462,10 @@ async function refreshClaims() {
       try { checks = await api(`/claims/${claim.id}/checks`); } catch { checks = []; }
       const links = (summary?.items || []).map(item => {
         const flags = (summary.scope_flags || []).filter(flag => flag.claim_evidence_id === item.claim_evidence_id);
-        return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · tier ${esc(item.effective_tier)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
+        return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · ${tierPhrase(item)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
       }).join('');
       const roleLabel = claim.claim_role === 'attribution' ? 'Attribution claim' : 'Substantive claim';
-      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)} · ${esc(roleLabel)}</b>${reviewBadge(claim)}</div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
+      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)} · ${esc(roleLabel)}</b>${reviewBadge(claim)}</div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>${tierChip(summary)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verificationPanel(checks, claim.id)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
     }));
     const present = new Set(claims.map(claim => claim.id));
     const extras = libraryClaims.filter(claim => !present.has(claim.id)).map(claim => `<article class="claim read-only"><b>Library claim #${claim.id}</b><p>${esc(claim.body)}</p><p>Read-only. Linked from library entry #${currentLibraryEntry.id}${currentLibraryEntry.stale ? '. Not the current answer.' : ''}.</p><p><a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p></article>`).join('');
@@ -640,7 +661,7 @@ function verificationPanel(checks, claimId) {
   const earlier = rows.filter(check => check.superseded);
   const items = current.length ? current.map(checkItem).join('') : '<li>No current automated check has been recorded.</li>';
   const history = earlier.length
-    ? `<details><summary>Earlier leads (${earlier.length})</summary><ul>${earlier.map(checkItem).join('')}</ul></details>`
+    ? `<details><summary>Earlier checks (${earlier.length})</summary><ul>${earlier.map(checkItem).join('')}</ul></details>`
     : '';
   const button = claimId ? `<button type="button" data-rerun-claim="${claimId}">Re-run checks</button>` : '';
   return `<div class="verification"><p><b>Verification</b></p>${sourceCheckSummary(current)}<ul>${items}</ul>${history}${button}</div>`;
@@ -653,7 +674,13 @@ async function loadFactcheckQueue() {
   try {
     const rows = await api('/factcheck/queue');
     const html = rows.length
-      ? rows.map(check => `<article class="item"><b>${esc(check.result)}</b> · ${esc(check.checker_name)} · source ${esc(check.source_id ?? 'none')} · claim ${esc(check.claim_id ?? 'none')}<div>${esc(check.detail || '')}</div><div>${esc(formatWhen(check.created_at))}</div>${check.evidence_url ? `<div><a href="${esc(check.evidence_url)}">Record</a></div>` : ''}${check.archive_url ? `<div><a href="${esc(check.archive_url)}">Archive snapshot</a></div>` : ''}${check.source_id ? `<button type="button" data-rerun-source="${check.source_id}">Re-run checks</button>` : ''}</article>`).join('')
+      ? rows.map(check => {
+        const source = check.source_title
+          ? `${esc(check.source_title)}${check.source_locator ? ` · ${esc(check.source_locator)}` : ''}`
+          : `source ${esc(check.source_id ?? 'none')}`;
+        const claim = check.claim_id ? `claim ${esc(check.claim_id)}` : 'no claim recorded';
+        return `<article class="item"><b>${esc(check.result)}</b> · ${esc(check.checker_name)} · ${source} · ${claim}<div>${esc(check.detail || '')}</div><div>${esc(formatWhen(check.created_at))}</div>${check.evidence_url ? `<div><a href="${esc(check.evidence_url)}">Record</a></div>` : ''}${check.archive_url ? `<div><a href="${esc(check.archive_url)}">Archive snapshot</a></div>` : ''}${check.source_id ? `<button type="button" data-rerun-source="${check.source_id}">Re-run checks</button>` : ''}</article>`;
+      }).join('')
       : '<p class="muted">No flagged checks.</p>';
     if (target) target.innerHTML = html;
     if (review) review.innerHTML = html;

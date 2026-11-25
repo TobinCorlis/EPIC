@@ -13,6 +13,7 @@ from app.schemas.evidence import SourceRead
 from app.schemas.factcheck import SourceCheckRead, SourceUpdate, VerificationJobRead
 from app.services.evidence_scoring import score_source
 from app.services.factcheck.http import get_transport
+from app.services.factcheck.text import extract_doi
 from app.services.factcheck.runner import enqueue_verification, run_claim_checks, run_source_checks
 
 router = APIRouter(tags=["factcheck"])
@@ -30,6 +31,27 @@ FLAGGED = {
     "corrected",
     "check_failed",
 }
+
+
+def _enrich(db: Session, rows: list[SourceCheck]) -> list[SourceCheckRead]:
+    source_ids = {row.source_id for row in rows if row.source_id}
+    sources = {
+        source.id: source
+        for source in db.query(Source).filter(Source.id.in_(source_ids or [0])).all()
+    }
+    enriched = []
+    for row in rows:
+        payload = SourceCheckRead.model_validate(row).model_dump()
+        source = sources.get(row.source_id)
+        if source is not None:
+            payload["source_title"] = source.title
+            payload["source_locator"] = extract_doi(source.url, source.document_reference) or source.url or source.document_reference
+        if payload["claim_id"] is None and row.citation_id is not None:
+            link = db.query(ClaimEvidence.claim_id).filter(ClaimEvidence.citation_id == row.citation_id).first()
+            if link is not None:
+                payload["claim_id"] = link[0]
+        enriched.append(SourceCheckRead(**payload))
+    return enriched
 
 
 def _checks_for_source(db: Session, source_id: int) -> list[SourceCheck]:
@@ -70,7 +92,7 @@ def update_source(
 def list_source_checks(source_id: int, db: Session = Depends(get_db)):
     if db.get(Source, source_id) is None:
         raise HTTPException(status_code=404, detail="Source not found")
-    return _checks_for_source(db, source_id)
+    return _enrich(db, _checks_for_source(db, source_id))
 
 
 @router.post("/sources/{source_id}/checks", response_model=list[SourceCheckRead])
@@ -108,7 +130,7 @@ def rerun_source_checks(
             job.error_message = str(exc)[:2000]
             db.commit()
         raise
-    return _checks_for_source(db, source_id)
+    return _enrich(db, _checks_for_source(db, source_id))
 
 
 @router.get("/claims/{claim_id}/checks", response_model=list[SourceCheckRead])
@@ -127,7 +149,8 @@ def list_claim_checks(claim_id: int, db: Session = Depends(get_db)):
     filters = [SourceCheck.claim_id == claim_id]
     if source_ids:
         filters.append(SourceCheck.source_id.in_(source_ids))
-    return db.query(SourceCheck).filter(or_(*filters)).order_by(SourceCheck.id).all()
+    rows = db.query(SourceCheck).filter(or_(*filters)).order_by(SourceCheck.id).all()
+    return _enrich(db, rows)
 
 
 @router.post("/claims/{claim_id}/checks", response_model=list[SourceCheckRead])
@@ -191,7 +214,8 @@ def factcheck_queue(db: Session = Depends(get_db), _: User = Depends(require_aut
     rows = {row.id: row for row in flagged}
     for row in consensus:
         rows.setdefault(row.id, row)
-    return [rows[key] for key in sorted(rows, reverse=True)]
+    ordered = [rows[key] for key in sorted(rows, reverse=True)]
+    return _enrich(db, ordered)
 
 
 @router.get("/factcheck/jobs", response_model=list[VerificationJobRead])

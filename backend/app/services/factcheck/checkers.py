@@ -166,7 +166,7 @@ def crossref_checks(transport, doi: str, entered: dict) -> list[dict]:
         detail=meta_detail,
         evidence_url=f"https://doi.org/{doi}",
     )]
-    rows.extend(_crossref_notices(message, query))
+    rows.extend(_crossref_notices(message, query, doi))
     return rows
 
 
@@ -181,34 +181,79 @@ def _notice_result(kind: str) -> str | None:
     return None
 
 
-def _crossref_notices(message: dict, query: str) -> list[dict]:
-    found: list[tuple[str, str | None]] = []
-    for item in message.get("update-to") or []:
-        if isinstance(item, dict):
-            found.append((str(item.get("type") or item.get("label") or ""), item.get("DOI") or item.get("id")))
-    for key, items in (message.get("relation") or {}).items():
-        if _notice_result(str(key)) is None:
-            continue
-        for item in items or []:
-            if isinstance(item, dict):
-                found.append((str(key), item.get("id") or item.get("DOI")))
+def _crossref_notices(message: dict, query: str, subject_doi: str) -> list[dict]:
+    """Name the retracted paper and the notice. Do not call the paper the notice."""
+    subject = subject_doi.casefold()
     rows = []
     seen = set()
-    for kind, notice_id in found:
-        result = _notice_result(kind)
-        if result is None or (result, notice_id) in seen:
-            continue
-        seen.add((result, notice_id))
-        notice = str(notice_id or "")
+
+    def other_doi(value) -> str:
+        return str(value or "").removeprefix("https://doi.org/").strip().rstrip(").,;")
+
+    def add_retraction(notice: str, kind: str) -> None:
+        notice = other_doi(notice)
+        if not notice or notice.casefold() == subject or ("retracted", notice) in seen:
+            return
+        seen.add(("retracted", notice))
         rows.append(_draft(
-            checker_name="retraction" if result == "retracted" else "notice",
+            checker_name="retraction",
             api_name=CROSSREF,
             query=query,
-            result=result,
-            response_id=notice or None,
-            evidence_url=f"https://doi.org/{notice}" if notice.startswith("10.") else None,
-            detail=f"Crossref relation '{kind}'." + (f" Notice DOI {notice}." if notice else ""),
+            result="retracted",
+            response_id=notice,
+            evidence_url=f"https://doi.org/{notice}",
+            detail=f"This paper {subject_doi} is retracted. Notice DOI {notice}. Crossref relation '{kind}'.",
         ))
+
+    def add_notice_of(paper: str, kind: str) -> None:
+        paper = other_doi(paper)
+        if not paper or paper.casefold() == subject or ("notice-of", paper) in seen:
+            return
+        seen.add(("notice-of", paper))
+        rows.append(_draft(
+            checker_name="notice",
+            api_name=CROSSREF,
+            query=query,
+            result="retraction_notice",
+            response_id=paper,
+            evidence_url=f"https://doi.org/{paper}",
+            detail=(
+                f"This record {subject_doi} is the retraction notice for {paper}. "
+                "It is not the retracted paper."
+            ),
+        ))
+
+    for item in message.get("update-to") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("type") or item.get("label") or "")
+        result = _notice_result(kind)
+        target = other_doi(item.get("DOI") or item.get("id"))
+        if result == "retracted":
+            add_retraction(target, kind)
+        elif result is not None and target and target.casefold() != subject:
+            rows.append(_draft(
+                checker_name="notice",
+                api_name=CROSSREF,
+                query=query,
+                result=result,
+                response_id=target,
+                evidence_url=f"https://doi.org/{target}",
+                detail=f"Crossref relation '{kind}'. Related DOI {target}.",
+            ))
+    for key, items in (message.get("relation") or {}).items():
+        folded = str(key).casefold()
+        if _notice_result(folded) is None and "retract" not in folded:
+            continue
+        notice_of_paper = "retraction-of" in folded or folded in {"retracts", "is-retraction-of"}
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            target = other_doi(item.get("id") or item.get("DOI"))
+            if notice_of_paper:
+                add_notice_of(target, key)
+            elif _notice_result(folded) == "retracted" or "retract" in folded:
+                add_retraction(target, key)
     return rows
 
 
@@ -529,7 +574,7 @@ def courtlistener_check(transport, opinion_id: str) -> dict:
     )
 
 
-def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str, http_status: int | None) -> dict:
+def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str, http_status: int | None, claim_id: int | None = None) -> dict:
     if http_status in {401, 403}:
         return _draft(
             checker_name="quote",
@@ -537,6 +582,7 @@ def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str,
             query=f"citation {citation_id}",
             result="text_not_accessible",
             citation_id=citation_id,
+            claim_id=claim_id,
             http_status=http_status,
             detail="The page refused access. The quote was not treated as missing or as a refutation.",
         )
@@ -557,6 +603,7 @@ def quote_checks(excerpt: str, citation_id: int, body: bytes, content_type: str,
         result=result,
         match_score=score,
         citation_id=citation_id,
+        claim_id=claim_id,
         matched_snippet=snippet or None,
         detail=detail,
     )

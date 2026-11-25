@@ -39,6 +39,8 @@ class SourceCheckRead(BaseModel):
     detail: str
     superseded: bool = False
     created_at: datetime
+    source_title: str | None = None
+    source_locator: str | None = None
 
 
 class VerificationJobRead(BaseModel):

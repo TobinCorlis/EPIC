@@ -114,6 +114,7 @@ class EvidenceItemRead(BaseModel):
     source_type_reviewed: bool
     effective_tier: str
     tier_rank: int
+    tier_basis: str = "unreviewed"
     independence_key: str
     claim_supported: str
     source_id: int | None = None
@@ -166,6 +167,8 @@ class ClaimEvidenceSummary(BaseModel):
     claim_id: int
     items: list[EvidenceItemRead]
     strongest_effective_tier: str
+    strongest_tier_basis: str = "unreviewed"
+    strongest_tier_rank: int = 0
     independent_source_count: int
     citation_count: int
     citation_requirement_met: bool

@@ -124,7 +124,14 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
         .filter(ClaimEvidence.claim_id == claim_id)
         .all()
     )
-    summary = summarize_evidence(links)
+    from app.services.factcheck.status import automated_record_found
+
+    confirmed = {
+        link.citation.source.id
+        for link in links
+        if link.citation is not None and link.citation.source is not None and automated_record_found(db, link.citation.source.id)
+    }
+    summary = summarize_evidence(links, confirmed)
     confidence = assess_claim(db, claim_id)
     flags = review_claim_scope(db, claim)
     db.commit()
@@ -148,6 +155,8 @@ def get_evidence_summary(claim_id: int, db: Session = Depends(get_db)):
         claim_id=claim_id,
         items=items,
         strongest_effective_tier=summary.strongest_effective_tier,
+        strongest_tier_basis=summary.strongest_tier_basis,
+        strongest_tier_rank=summary.strongest_tier_rank,
         independent_source_count=summary.independent_source_count,
         citation_count=summary.citation_count,
         citation_requirement_met=(not claim.citation_required) or summary.citation_count > 0,

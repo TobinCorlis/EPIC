@@ -615,8 +615,9 @@ def test_workspace_shows_the_verification_panel():
     assert "Re-run checks" in script
     assert "Verification queue" in page
     assert "Automated lookup of cited sources is not implemented" not in script
-    assert "app.js?v=24" in page
-    assert "Earlier leads" in script
+    assert "app.js?v=25" in page
+    assert "Earlier checks" in script
+    assert "from an automated check" in script
     assert "The quoted text was not found in the accessible source text." in script
     assert "Attribution claim" in script
     assert "Source #" in script and "Existence" in script and "Archive" in script
@@ -1105,6 +1106,92 @@ def test_oversized_response_is_not_written_into_the_cache(monkeypatch):
     assert result.status == 200
     with SessionLocal() as db:
         assert db.query(FactcheckCache).filter(FactcheckCache.url == url).count() == 0
+
+
+def _work(doi, title, update_to=None, relation=None):
+    message = {
+        "DOI": doi,
+        "title": [title],
+        "author": [{"family": "Lovelace", "given": "Ada"}],
+        "issued": {"date-parts": [[2020]]},
+        "container-title": ["Journal of Examples"],
+    }
+    if update_to is not None:
+        message["update-to"] = update_to
+    if relation is not None:
+        message["relation"] = relation
+    return json_response(200, {"status": "ok", "message": message}, f"https://api.crossref.org/works/{doi}")
+
+
+def test_retraction_names_the_paper_and_the_notice():
+    headers, _user_id = _user(UserRole.moderator)
+    paper = _source(headers, "Retracted paper", "https://doi.org/10.1038/35099520")
+    notice = _source(headers, "Retraction notice", "https://doi.org/10.1038/nature01464")
+    set_transport(FakeTransport([
+        (lambda method, url: "10.1038/35099520" in url, _work(
+            "10.1038/35099520",
+            "Retracted paper",
+            update_to=[{"type": "retraction", "DOI": "10.1038/nature01464", "label": "Retraction"}],
+        )),
+        (lambda method, url: "10.1038/nature01464" in url, _work(
+            "10.1038/nature01464",
+            "Retraction notice",
+            relation={"is-retraction-of": [{"id": "10.1038/35099520", "id-type": "doi"}]},
+        )),
+    ]))
+    paper_rows = client.post(f"/sources/{paper['id']}/checks", headers=headers).json()
+    retraction = next(row for row in paper_rows if row["checker_name"] == "retraction" and not row["superseded"])
+    assert "This paper 10.1038/35099520 is retracted" in retraction["detail"]
+    assert "Notice DOI 10.1038/nature01464" in retraction["detail"]
+    assert "Notice DOI 10.1038/35099520" not in retraction["detail"]
+    notice_rows = client.post(f"/sources/{notice['id']}/checks", headers=headers).json()
+    assert not any(row["result"] == "retracted" and not row["superseded"] for row in notice_rows)
+    assert any("retraction notice for 10.1038/35099520" in row["detail"] for row in notice_rows)
+
+
+def test_queue_keeps_only_the_latest_quote_check_and_names_the_claim():
+    headers, _user_id = _user()
+    source = _source(headers, "Quoted shoreline", "https://doi.org/10.1000/queue-quote")
+    claim = _debate_claim("The paper says the shoreline rose.")
+    _link(claim["id"], source["id"], excerpt="a sentence that is not on the page at all")
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/queue-quote", "Quoted shoreline")),
+        (lambda method, url: url.startswith("https://doi.org/10.1000/queue-quote"), text_response(
+            200, "<p>The page records rainfall only.</p>", "https://doi.org/10.1000/queue-quote",
+        )),
+        (lambda method, url: "wayback/available" in url, json_response(200, {"archived_snapshots": {}})),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    queue = client.get("/factcheck/queue", headers=headers).json()
+    quotes = [row for row in queue if row["checker_name"] == "quote" and row["source_id"] == source["id"]]
+    assert len(quotes) == 1
+    assert quotes[0]["claim_id"] == claim["id"]
+    assert quotes[0]["source_title"] == "Quoted shoreline"
+    assert quotes[0]["source_locator"] == "10.1000/queue-quote"
+    stored = client.get(f"/claims/{claim['id']}/checks").json()
+    history = [row for row in stored if row["checker_name"] == "quote"]
+    assert len(history) == 2
+    assert sum(1 for row in history if row["superseded"]) == 1
+
+
+def test_confirmed_source_tier_matches_the_declared_rank():
+    headers, _user_id = _user()
+    source = _source(headers, "Measured shoreline", "https://doi.org/10.1000/tier-card")
+    claim = _debate_claim("The paper measured the shoreline.")
+    _link(claim["id"], source["id"])
+    set_transport(FakeTransport([
+        (lambda method, url: "api.crossref.org" in url, _crossref("10.1000/tier-card", "Measured shoreline")),
+    ]))
+    client.post(f"/sources/{source['id']}/checks", headers=headers)
+    summary = client.get(f"/claims/{claim['id']}/evidence-summary").json()
+    item = summary["items"][0]
+    assert item["effective_tier"] == "peer_reviewed"
+    assert item["tier_rank"] == 5
+    assert item["tier_basis"] == "automated check"
+    assert summary["strongest_effective_tier"] == "peer_reviewed"
+    assert summary["strongest_tier_rank"] == 5
+    assert summary["strongest_tier_basis"] == "automated check"
 
 
 @pytest.mark.skipif(os.environ.get("EPIC_LIVE_FACTCHECK") != "1", reason="Set EPIC_LIVE_FACTCHECK=1 to call Crossref")
