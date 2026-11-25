@@ -1,6 +1,7 @@
 let token = localStorage.getItem('epic_token');
 let currentDebate = null;
 let currentUser = null;
+let currentLibraryEntry = null;
 let socket = null;
 const $ = id => document.getElementById(id);
 
@@ -39,19 +40,51 @@ function scoreText(value) {
   return value == null || value === '' ? 'unknown' : String(value);
 }
 
+function formatFactor(value) {
+  if (value == null || value === '') return 'unknown';
+  return (Math.round(Number(value) * 100) / 100).toFixed(2);
+}
+
+function formatScore(value) {
+  if (value == null || value === '') return 'Unknown – not yet rated';
+  const rounded = (Math.round(Number(value) * 100) / 100).toFixed(2);
+  const percent = Math.round(Number(value) * 100);
+  return `${rounded} on a 0–1 scale (${percent}%)`;
+}
+
+function formatWhen(value) {
+  if (!value) return '';
+  let text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}T/.test(text) && !/(?:Z|[+-]\d{2}:?\d{2})$/.test(text)) text += 'Z';
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return String(value);
+  try {
+    const formatted = date.toLocaleString(undefined, {year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'});
+    const zone = date.toLocaleTimeString(undefined, {timeZoneName: 'short'}).split(' ').pop();
+    return zone && zone !== formatted ? `${formatted} ${zone}` : date.toUTCString();
+  } catch {
+    return date.toUTCString();
+  }
+}
+
 function written(map, value) {
   return map[value] || (value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Not recorded');
 }
 
 function confidenceBlock(confidence) {
-  if (!confidence) return '<p><b>Confidence:</b> unknown</p>';
+  if (!confidence) return '<p><b>Confidence:</b> Unknown – not yet rated</p>';
+  const label = confidence.label || (confidence.confidence_score == null ? 'Unknown – not yet rated' : 'Rated');
   const factors = (confidence.factors || []).map(factor =>
-    `<li><b>${esc(factor.name)}</b>: ${esc(scoreText(factor.value))}. ${esc(factor.detail || '')}</li>`
+    `<li><b>${esc(factor.name)}</b>: ${esc(formatFactor(factor.value))}. ${esc(factor.detail || '')}</li>`
   ).join('');
   const automated = confidence.automated_source_check
-    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'Automated source checking is not implemented.')}</p>`
+    ? `<p>Automated source check: ${esc(confidence.automated_source_check)}. ${esc(confidence.automated_source_check_detail || 'Automated lookup of cited sources is not implemented.')}</p>`
     : '';
-  return `<div class="confidence"><p><b>Confidence:</b> ${esc(scoreText(confidence.confidence_score))}</p>${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
+  const missing = confidence.cited_source_note ? `<p>${esc(confidence.cited_source_note)}</p>` : '';
+  const contradictions = (confidence.contradicting_sources || []).length
+    ? `<p><b>Contradicting sources:</b> ${(confidence.contradicting_sources || []).map(source => esc(source.title || ('Source #' + source.id))).join(', ')}</p>`
+    : '';
+  return `<div class="confidence"><p><b>Confidence:</b> ${esc(formatScore(confidence.confidence_score))}. <b>${esc(label)}</b></p>${missing}${contradictions}${factors ? `<ul>${factors}</ul>` : ''}${automated}</div>`;
 }
 
 function confidenceList(value) {
@@ -113,7 +146,7 @@ function decisionForms(requests) {
 }
 
 function requestList(requests) {
-  return (requests || []).map(request => `<article class="item"><b>Request #${request.id} · ${esc(request.status === 'open' ? 're-evaluation pending' : request.status)}</b><p>Asked by user #${request.requested_by_user_id} at ${esc(request.requested_at)}. ${esc(request.reason)}</p>${request.evidence_note ? `<p>Evidence note: ${esc(request.evidence_note)}</p>` : ''}${request.winning_reason ? `<p><b>Winning evidence:</b> source #${esc(request.winning_source_id)}. ${esc(request.winning_reason)}</p>` : ''}</article>`).join('');
+  return (requests || []).map(request => `<article class="item"><b>Request #${request.id} · ${esc(request.status === 'open' ? 're-evaluation pending' : request.status)}</b><p>Asked by ${esc(request.requested_by_display_name || 'an unnamed person')} on ${formatWhen(request.requested_at)}. ${esc(request.reason)}</p>${request.evidence_note ? `<p>Evidence note: ${esc(request.evidence_note)}</p>` : ''}${request.winning_reason ? `<p><b>Winning evidence:</b> source #${esc(request.winning_source_id)}. ${esc(request.winning_reason)}</p>` : ''}</article>`).join('');
 }
 
 function setAuth(on) {
@@ -214,7 +247,7 @@ async function refreshVerifiedClaims() {
       claims.filter(claim => claim.status === 'verified').forEach(claim => cards.push(claim));
     }
     $('verifiedClaims').innerHTML = cards.length
-      ? cards.map(claim => `<article class="claim"><div class="row spread"><b>Knowledge claim #${claim.id}</b><span class="badge good">Verified</span></div><p>${esc(claim.body)}</p>${historyBlock(claim.status_history)}<p><b>Confidence:</b> ${esc(scoreText(claim.confidence_score))}</p>${reevaluationForm('knowledge', claim.id)}</article>`).join('')
+      ? cards.map(claim => `<article class="claim"><div class="row spread"><b>Knowledge claim #${claim.id}</b><span class="badge good">Verified</span></div><p>${esc(claim.body)}</p>${historyBlock(claim.status_history)}<p><b>Confidence:</b> ${esc(formatScore(claim.confidence_score))}</p>${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : reevaluationForm('knowledge', claim.id)}</article>`).join('')
       : '<p class="muted">No verified knowledge claims are recorded.</p>';
   } catch (error) {
     $('verifiedClaims').innerHTML = `<p class="error">${esc(error.message)}</p>`;
@@ -225,30 +258,43 @@ function versionArticle(version, current) {
   return `<article class="item"><b>Version ${version.version_number}${current ? ' · current' : ''}</b><p>Answer: ${esc(written(ANSWERS, version.direct_answer))}</p><p>Status: ${esc(written(STATUSES, version.status))}</p><p>Outcome: ${esc(written({}, version.outcome))}</p><p><b>Facts:</b> ${esc(version.facts)}</p><p><b>Interpretation:</b> ${esc(version.interpretation)}</p><p><b>Uncertainty:</b> ${esc(blank(version.uncertainty))}</p><p>Last reviewed ${esc(String(version.last_reviewed_at).slice(0, 10))}. ${esc(version.change_log)}</p>${version.winning_reason ? `<p><b>Winning evidence:</b> source #${esc(version.winning_source_id)}. ${esc(version.winning_reason)}</p>` : ''}${confidenceList(version.confidence)}</article>`;
 }
 
-function renderEntry(entry) {
+function renderEntry(entry, back = 'results') {
   const current = entry.stale ? null : entry.current_version;
-  const state = entry.reevaluation_pending ? 're-evaluation pending' : (entry.stale ? 'Stale. This is not the current answer.' : 'Current');
+  const state = entry.reevaluation_pending ? 're-evaluation pending' : (entry.stale ? 'Stale. This is not the current answer.' : (entry.needs_review ? 'Needs review' : 'Current'));
   const sources = (entry.sources || []).map(source => `<li>Source #${source.id}: ${esc(source.title)}${source.url ? ` · ${esc(source.url)}` : ''}${source.document_reference ? ` · ${esc(source.document_reference)}` : ''}</li>`).join('') || '<li>No source is linked.</li>';
   const claims = (entry.supporting_claims || []).map(claim => `<li>Claim #${claim.id}: ${esc(claim.body)}</li>`).join('') || '<li>No supporting claim is linked.</li>';
   const checks = (entry.verifications || []).map(event => `<li>Verification #${event.id}: ${esc(event.result_status)} by ${esc(event.method)}${event.mistake_reason ? ` · invalidated: ${esc(event.mistake_reason)}` : ''}</li>`).join('') || '<li>No verification event is linked.</li>';
+  const history = (entry.versions || []).filter(version => !current || version.id !== current.id);
+  const pending = entry.reevaluation_pending || (entry.requests || []).some(request => request.status === 'open');
+  const backButton = back === 'debate'
+    ? '<p><button type="button" data-library-back="debate">Back to debate</button></p>'
+    : '<p><button type="button" data-library-back="results">Back to results</button></p>';
   return `<article class="claim" id="library-entry-${entry.id}">
-    <div class="row spread"><b>Library entry #${entry.id}</b><span class="badge ${entry.stale || entry.reevaluation_pending ? 'warn' : 'good'}">${esc(entry.status_label || state)}</span></div>
+    ${backButton}
+    <div class="row spread"><b>Library entry #${entry.id}</b><span class="badge ${entry.stale || entry.reevaluation_pending || entry.needs_review ? 'warn' : 'good'}">${esc(entry.status_label || state)}</span></div>
     <p>${esc(entry.question)}</p>
     <p>Scope: population ${esc(blank(entry.question_population))}; timeframe ${esc(blank(entry.question_timeframe))}; geography ${esc(blank(entry.question_geography))}; metric ${esc(blank(entry.question_metric))}.</p>
-    <p><b>${esc(state)}</b>${entry.stale ? ' Needs review. The stored answer is not being served as current.' : ''}</p>
-    ${current ? `<h3>Current answer</h3>${versionArticle(current, true)}` : '<p><b>Current answer:</b> none. A stale or pending entry is not served as the current answer.</p>'}
+    <p><b>${esc(state)}</b>${entry.stale ? ' The stored answer is not being served as current.' : ''}</p>
+    ${current ? `<h3>Current answer</h3>${versionArticle(current, true)}` : '<p><b>Current answer:</b> none. A stale entry is not served as the current answer.</p>'}
     <h3>Linked evidence and sources</h3><ul>${claims}${sources}${checks}</ul>
-    <h3>Version history</h3>${(entry.versions || []).map(version => versionArticle(version, current && version.id === current.id)).join('') || '<p>No versions.</p>'}
+    <h3>Version history</h3>${current ? `<p>Version ${current.version_number} is the current answer above and is not repeated here.</p>` : ''}${history.map(version => versionArticle(version, false)).join('') || '<p>No earlier versions.</p>'}
     ${requestList(entry.requests)}
-    ${reevaluationForm('entry', entry.id)}
+    ${pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : reevaluationForm('entry', entry.id)}
     ${decisionForms(entry.requests)}
   </article>`;
 }
 
 async function openLibrary(id) {
   const entry = await api('/library/entries/' + id);
-  $('libraryDetail').innerHTML = renderEntry(entry);
+  $('libraryDetail').innerHTML = renderEntry(entry, 'results');
   $('libraryDetail').scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+async function openLibraryInWorkspace(id) {
+  const entry = await api('/library/entries/' + id);
+  $('workspaceLibrary').hidden = false;
+  $('workspaceLibrary').innerHTML = renderEntry(entry, 'debate');
+  $('workspaceLibrary').scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 async function searchLibrary() {
@@ -281,7 +327,7 @@ async function openWorkspace(debate) {
   $('workspaceTitle').textContent = currentDebate.title;
   $('workspaceQuestion').textContent = currentDebate.fixed_question;
   showPanel('claimsPanel');
-  await Promise.all([refreshClaims(), refreshRoom(), renderLibraryAttachment()]);
+  await Promise.all([refreshClaims(), refreshRoom()]);
   connectRoom();
   $('workspace').scrollIntoView({behavior: 'smooth', block: 'start'});
   window.scrollTo({top: 0, behavior: 'smooth'});
@@ -300,6 +346,7 @@ async function renderLibraryAttachment() {
   const answer = $('libraryAnswer');
   banner.hidden = true;
   answer.innerHTML = '';
+  currentLibraryEntry = null;
   if (!currentDebate || !currentDebate.library_entry_id) {
     if (currentDebate && currentDebate.library_notice) {
       banner.hidden = false;
@@ -308,6 +355,7 @@ async function renderLibraryAttachment() {
     return;
   }
   const entry = await api('/library/entries/' + currentDebate.library_entry_id);
+  currentLibraryEntry = entry;
   const stale = currentDebate.library_stale || entry.stale;
   banner.hidden = false;
   banner.innerHTML = `<p>${esc(currentDebate.library_notice || 'A library entry is attached to this debate.')}${stale ? ' This answer is not current.' : ''}</p><p><a href="#library-entry-${entry.id}" data-open-entry="${entry.id}">Open library entry #${entry.id}</a></p>`;
@@ -345,6 +393,9 @@ async function refreshClaims() {
       api(`/debates/${currentDebate.id}/claims`),
       api(`/debates/${currentDebate.id}/arguments`),
     ]);
+    await renderLibraryAttachment();
+    const libraryClaims = currentLibraryEntry?.supporting_claims || [];
+    const linkedIds = new Set(libraryClaims.map(claim => claim.id));
     const verified = new Set(nodes.filter(node => node.verification_status === 'verified' && node.claim_id).map(node => node.claim_id));
     $('evidenceClaim').innerHTML = claims.length ? claims.map(claim => `<option value="${claim.id}">#${claim.id} ${esc(claim.body).slice(0, 90)}</option>`).join('') : '<option value="">Add a claim first</option>';
     const cards = await Promise.all(claims.map(async claim => {
@@ -354,15 +405,16 @@ async function refreshClaims() {
         const flags = (summary.scope_flags || []).filter(flag => flag.claim_evidence_id === item.claim_evidence_id);
         return `<article class="evidence-link"><b>Evidence link #${item.claim_evidence_id} · ${esc(item.stance)}</b><p>${esc(item.source_title || 'Source not recorded')} · tier ${esc(item.effective_tier)}</p><p>${esc(item.claim_supported)}</p><p>${scopeLine(item)}</p>${flags.length ? flagBlock(flags, '') : ''}</article>`;
       }).join('');
-      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${verified.has(claim.id) ? reevaluationForm('claim', claim.id) : ''}</article>`;
+      return `<article class="claim"><div class="row spread"><b>Claim #${claim.id} · ${esc(claim.claim_type)}</b><span class="badge ${claim.needs_review ? 'warn' : 'good'}">${claim.needs_review ? 'Flagged for review' : 'No review flag'}</span></div><p>${esc(claim.body)}</p><p>Scope: population ${esc(blank(claim.scope_population))}; timeframe ${esc(blank(claim.scope_timeframe))}; geography ${esc(blank(claim.scope_geography))}; metric ${esc(blank(claim.scope_metric))}.</p>${claim.uncertainty ? `<p><b>Uncertainty:</b> ${esc(claim.uncertainty)}</p>` : ''}${(claim.corrections || []).map(item => `<p><b>Correction:</b> ${esc(item.original_body)} → ${esc(item.corrected_body)} (${esc(item.reason)})</p>`).join('')}${historyBlock(claim.status_notes)}<p>${esc(claim.moderation_note || 'No moderation note')}</p>${claim.library_notice ? `<p><b>Library:</b> ${esc(claim.library_notice)}</p>` : ''}${linkedIds.has(claim.id) ? `<p>Linked from library entry #${currentLibraryEntry.id}. Read-only in this record. <a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p>` : ''}${summary ? `<div class="metrics"><span>${summary.citation_count} citation(s)</span><span>Strongest tier ${esc(summary.strongest_effective_tier)}</span><span>${summary.independent_source_count} independent source(s)</span><span>${summary.citation_requirement_met ? 'Citation requirement met' : 'Citation needed'}</span></div>${confidenceBlock(summary.confidence)}${links}${flagBlock(summary.scope_flags, summary.scope_check)}` : confidenceBlock(null)}${claim.reevaluation_pending ? '<p>Re-evaluation pending. The request form stays closed until this request is decided.</p>' : (verified.has(claim.id) ? reevaluationForm('claim', claim.id) : '')}</article>`;
     }));
-    $('claims').innerHTML = cards.length ? cards.join('') : '<p class="muted">No claims have been added.</p>';
+    const present = new Set(claims.map(claim => claim.id));
+    const extras = libraryClaims.filter(claim => !present.has(claim.id)).map(claim => `<article class="claim read-only"><b>Library claim #${claim.id}</b><p>${esc(claim.body)}</p><p>Read-only. Linked from library entry #${currentLibraryEntry.id}${currentLibraryEntry.stale ? '. Not the current answer.' : ''}.</p><p><a href="#library-entry-${currentLibraryEntry.id}" data-open-entry="${currentLibraryEntry.id}">Open library entry #${currentLibraryEntry.id}</a></p></article>`).join('');
+    $('claims').innerHTML = (cards.length ? cards.join('') : '<p class="muted">No claims have been added.</p>') + extras;
     const fresh = [...claims.map(claim => ({body: claim.body, status: claim.library_point_status, notice: claim.library_notice})), ...nodes.map(node => ({body: node.body, status: node.library_point_status, notice: node.library_notice}))];
     const novel = fresh.filter(point => point.status === 'new point, not yet researched');
     $('newPoints').innerHTML = novel.length
       ? `<article class="claim"><h3>New points, not yet researched</h3><ul>${novel.map(point => `<li>${esc(point.body)}. Automated research is not implemented.</li>`).join('')}</ul></article>`
       : '';
-    await renderLibraryAttachment();
   } catch (error) {
     $('claims').innerHTML = `<p class="error">${esc(error.message)}</p>`;
   }
@@ -508,11 +560,14 @@ document.body.addEventListener('click', event => {
   if (entryButton) {
     event.preventDefault();
     const entryId = Number(entryButton.dataset.openEntry);
-    if ($('home').hidden) {
-      $('home').hidden = false;
-      $('workspace').hidden = true;
-    }
-    openLibrary(entryId);
+    if (!$('workspace').hidden) openLibraryInWorkspace(entryId);
+    else openLibrary(entryId);
+  }
+  if (event.target.closest('[data-library-back="results"]')) $('libraryResults').scrollIntoView({behavior: 'smooth', block: 'start'});
+  if (event.target.closest('[data-library-back="debate"]')) {
+    $('workspaceLibrary').hidden = true;
+    $('workspaceLibrary').innerHTML = '';
+    $('claimsPanel').scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 });
 

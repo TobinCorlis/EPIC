@@ -141,7 +141,19 @@ def add_knowledge_claim(
 @router.get("/dossiers/{dossier_id}/claims", response_model=list[KnowledgeClaimRead])
 def list_knowledge_claims(dossier_id: int, db: Session = Depends(get_db)):
     require_dossier(db, dossier_id)
-    return db.query(KnowledgeClaim).filter(KnowledgeClaim.dossier_id == dossier_id).order_by(KnowledgeClaim.id).all()
+    from app.models.library import ReevaluationRequest
+
+    claims = db.query(KnowledgeClaim).filter(KnowledgeClaim.dossier_id == dossier_id).order_by(KnowledgeClaim.id).all()
+    result = []
+    for claim in claims:
+        claim.reevaluation_pending = (
+            db.query(ReevaluationRequest)
+            .filter(ReevaluationRequest.knowledge_claim_id == claim.id, ReevaluationRequest.status == "open")
+            .first()
+            is not None
+        )
+        result.append(claim)
+    return result
 
 
 @router.post("/dossiers/{dossier_id}/match-claim", response_model=list[ClaimMatchRead])

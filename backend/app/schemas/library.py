@@ -61,6 +61,7 @@ class ReevaluationRead(BaseModel):
     evidence_note: str | None
     new_source_id: int | None
     requested_by_user_id: int
+    requested_by_display_name: str | None = None
     requested_at: datetime
     status: str
     decision: str | None
@@ -128,6 +129,7 @@ class LibraryEntryRead(BaseModel):
     question_metric: str | None
     stale: bool
     reevaluation_pending: bool
+    needs_review: bool = False
     status_label: str | None
     current_version: LibraryVersionRead | None
     versions: list[LibraryVersionRead]

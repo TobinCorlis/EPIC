@@ -40,12 +40,38 @@ def _apply_status(db: Session, payload: VerificationEventCreate) -> None:
         source.archived_at = utcnow()
 
 
+def _claim_ids_for_verification(db: Session, payload: VerificationEventCreate) -> list[int]:
+    if payload.subject_type == VerificationSubject.knowledge_claim:
+        subject = db.get(KnowledgeClaim, payload.subject_id)
+        if subject and subject.originating_claim_id:
+            return [subject.originating_claim_id]
+        return []
+    if payload.subject_type == VerificationSubject.argument_node:
+        subject = db.get(ArgumentNode, payload.subject_id)
+        if subject and subject.claim_id:
+            return [subject.claim_id]
+        return []
+    return []
+
+
 @router.post("", response_model=VerificationEventRead, status_code=status.HTTP_201_CREATED)
 def create_verification_event(
     payload: VerificationEventCreate,
     db: Session = Depends(get_db),
     user: User = Depends(require_authenticated),
 ):
+    if payload.result_status == RecordedVerificationStatus.verified and payload.subject_type != VerificationSubject.source:
+        from app.models.claim import Claim
+        from app.services.claim_confidence import SUPPORT_RULE, support_qualifies
+
+        claim_ids = _claim_ids_for_verification(db, payload)
+        if not support_qualifies(db, claim_ids):
+            for claim_id in claim_ids:
+                claim = db.get(Claim, claim_id)
+                if claim is not None:
+                    claim.needs_review = True
+            db.commit()
+            raise HTTPException(status_code=409, detail=SUPPORT_RULE)
     _apply_status(db, payload)
     event = VerificationEvent(
         subject_type=payload.subject_type,
